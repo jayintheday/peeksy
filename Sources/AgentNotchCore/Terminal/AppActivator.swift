@@ -39,6 +39,11 @@ public enum ActivationOutcome: Sendable, Equatable {
 public protocol AppActivating: Sendable {
     /// Resolve the owning application for a pid and bring it forward.
     func activateOwner(ofPid pid: Int32) -> ActivationOutcome
+    /// Resolve the owning application WITHOUT activating it.
+    ///
+    /// On the protocol rather than only on `SystemAppActivator` because click
+    /// routing needs the answer before it decides what to do — see `focusRoute`.
+    func owner(ofPid pid: Int32) -> OwningApp?
 }
 
 // MARK: - Activator
@@ -145,17 +150,59 @@ public enum FocusRoute: Sendable, Equatable {
     case unavailable(reason: String)
 }
 
+/// Terminal.app. The ONLY application `TerminalFocuser` can script.
+public let terminalBundleIdentifier = "com.apple.Terminal"
+
 /// Route a click.
 ///
-/// Order is deliberate. A tty is the only thing that can put the cursor back in
-/// the exact tab the agent is running in, so it always wins — even when the pid
-/// would also resolve to an app.
+/// A tty is the only thing that can put the cursor back in the exact tab the
+/// agent is running in, so it wins — **but only when Terminal.app is the app
+/// that owns it.**
+///
+/// That qualifier is the whole point of this function. A Claude Code session in
+/// VS Code's, Cursor's or iTerm2's integrated terminal has a perfectly real
+/// `ttysNNN`: the process scan finds it, the hook fires, the row shows full
+/// state — and then `tell application "Terminal"` is asked about a pty
+/// Terminal.app has never heard of, returns `notfound`, and the row is dead.
+/// The user sees a session they cannot click. Routing on the OWNER instead of
+/// on the mere presence of a tty is what makes those rows work: we raise the
+/// IDE, which is the best thing available and infinitely better than nothing.
+///
+/// Decided up front rather than as a fallback after a failed AppleScript: the
+/// round-trip costs an `osascript` spawn, and asking Terminal about a tty we
+/// already know it does not own can raise an Automation prompt for a lookup
+/// that was never going to succeed.
+///
+/// `ownerBundleID` defaults to "we do not know", which preserves the old
+/// tty-always-wins behaviour — an unknown owner must never downgrade a session
+/// that would have focused correctly.
 public func focusRoute(
     tty: String?,
     pid: Int32?,
-    isPidAlive: PidLiveness = systemPidLiveness
+    isPidAlive: PidLiveness = systemPidLiveness,
+    ownerBundleID: (Int32) -> String? = { _ in nil }
 ) -> FocusRoute {
-    if let normalized = normalizeTty(tty) { return .terminal(tty: normalized) }
+    let normalized = normalizeTty(tty)
+
+    if let normalized {
+        // No pid means no way to ask who owns the tty. Terminal.app is the
+        // overwhelmingly common case and the old behaviour, so keep it.
+        guard let pid, pid > 0 else { return .terminal(tty: normalized) }
+
+        switch ownerBundleID(pid) {
+        case terminalBundleIdentifier, nil:
+            // nil is "unknown", not "not Terminal": a tmux or ssh session has no
+            // GUI ancestor at all, and its outer tab may still be Terminal's.
+            return .terminal(tty: normalized)
+        case .some:
+            // Somebody else's terminal emulator. Fall through to raising it —
+            // but only if the process is still alive, for the same reason as below.
+            guard isPidAlive(pid) else {
+                return .unavailable(reason: "pid \(pid) is gone")
+            }
+            return .activateApp(pid: pid)
+        }
+    }
 
     guard let pid, pid > 0 else {
         return .unavailable(reason: "session has no tty and no pid")
@@ -171,7 +218,12 @@ public func focusRoute(
 
 public func focusRoute(
     for session: Session,
-    isPidAlive: PidLiveness = systemPidLiveness
+    isPidAlive: PidLiveness = systemPidLiveness,
+    ownerBundleID: (Int32) -> String? = { _ in nil }
 ) -> FocusRoute {
-    focusRoute(tty: session.tty, pid: session.pid, isPidAlive: isPidAlive)
+    focusRoute(
+        tty: session.tty,
+        pid: session.pid,
+        isPidAlive: isPidAlive,
+        ownerBundleID: ownerBundleID)
 }

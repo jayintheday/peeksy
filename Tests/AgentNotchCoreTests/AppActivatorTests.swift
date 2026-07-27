@@ -326,3 +326,109 @@ private final class Probe: @unchecked Sendable {
         }
     }
 }
+
+@Suite("focusRoute: the owner decides whether the tty is usable")
+struct FocusRouteOwnerTests {
+    private let alive: PidLiveness = { _ in true }
+    private let dead: PidLiveness = { _ in false }
+
+    private func owner(_ bundleID: String?) -> (Int32) -> String? {
+        { _ in bundleID }
+    }
+
+    @Test("Terminal.app owns the tty, so the exact tab is restored")
+    func terminalOwnedTty() {
+        #expect(focusRoute(tty: "ttys003", pid: 900, isPidAlive: alive,
+                           ownerBundleID: owner(terminalBundleIdentifier))
+                == .terminal(tty: "ttys003"))
+    }
+
+    @Test("an IDE's integrated terminal raises the IDE instead", arguments: [
+        "dev.zed.Zed",
+        "com.microsoft.VSCode",
+        "com.todesktop.230313mzl4w4u92",   // Cursor
+        "com.googlecode.iterm2",
+    ])
+    func ideOwnedTty(_ bundleID: String) {
+        // The bug this exists for: these ttys are REAL. The scan finds them, the
+        // hook fires, the row shows live state — and then Terminal.app is asked
+        // about a pty it has never heard of, answers notfound, and the row is
+        // dead on click. Raising the owning app is the honest answer.
+        #expect(focusRoute(tty: "ttys003", pid: 900, isPidAlive: alive,
+                           ownerBundleID: owner(bundleID))
+                == .activateApp(pid: 900))
+    }
+
+    @Test("an UNKNOWN owner keeps the tty — nil is not evidence of anything")
+    func unknownOwnerKeepsTty() {
+        // tmux, ssh, or a process whose GUI ancestor is beyond maxHops. The
+        // outer tab may well still be Terminal's, and downgrading a session that
+        // would have focused correctly is strictly worse than trying.
+        #expect(focusRoute(tty: "ttys003", pid: 900, isPidAlive: alive, ownerBundleID: owner(nil))
+                == .terminal(tty: "ttys003"))
+    }
+
+    @Test("no pid means no owner question can be asked, so the tty stands")
+    func noPidKeepsTty() {
+        #expect(focusRoute(tty: "ttys003", pid: nil, isPidAlive: dead,
+                           ownerBundleID: owner("dev.zed.Zed"))
+                == .terminal(tty: "ttys003"))
+    }
+
+    @Test("an IDE-owned tty whose process died is unavailable, never a raise")
+    func deadIdeProcess() {
+        // Same reasoning as the tty-less path: the kernel recycles pids, and
+        // raising "whatever owns 900" now could bring forward anything at all.
+        guard case let .unavailable(reason) = focusRoute(
+            tty: "ttys003", pid: 900, isPidAlive: dead, ownerBundleID: owner("dev.zed.Zed"))
+        else {
+            Issue.record("expected .unavailable")
+            return
+        }
+        #expect(reason.contains("900"))
+    }
+
+    @Test("the owner is not consulted at all when there is no tty")
+    func noOwnerProbeWithoutTty() {
+        // The tty-less path already routes to activation; asking who owns the
+        // pid twice would be a wasted ppid walk on every click.
+        let probes = OwnerProbe()
+        _ = focusRoute(tty: nil, pid: 37255, isPidAlive: alive, ownerBundleID: probes.lookup)
+        #expect(probes.count == 0)
+    }
+
+    @Test("the default keeps the old behaviour exactly")
+    func defaultIsUnchanged() {
+        // Every existing call site passes no owner, and must be unaffected.
+        #expect(focusRoute(tty: "ttys003", pid: 900, isPidAlive: alive) == .terminal(tty: "ttys003"))
+    }
+
+    @Test("the Session overload threads the owner through")
+    func sessionOverload() {
+        let now = Date()
+        let inIDE = Session(id: "a", source: .claudeCode, tty: "ttys009", pid: 900,
+                            updatedAt: now, createdAt: now)
+        #expect(focusRoute(for: inIDE, isPidAlive: alive, ownerBundleID: owner("dev.zed.Zed"))
+                == .activateApp(pid: 900))
+        #expect(focusRoute(for: inIDE, isPidAlive: alive,
+                           ownerBundleID: owner(terminalBundleIdentifier))
+                == .terminal(tty: "ttys009"))
+    }
+}
+
+private final class OwnerProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return calls
+    }
+
+    var lookup: (Int32) -> String? {
+        { [self] _ in
+            lock.lock(); calls += 1; lock.unlock()
+            return "dev.zed.Zed"
+        }
+    }
+}

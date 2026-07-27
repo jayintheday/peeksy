@@ -214,7 +214,15 @@ final class SessionStore {
         // THIS attempt rather than one from ten minutes ago.
         tccBlocked = false
 
-        let route = focusRoute(for: session, isPidAlive: registry.isPidAlive)
+        // The owner decides whether the tty is worth using. A session in VS
+        // Code's, Cursor's or iTerm2's integrated terminal has a real tty that
+        // Terminal.app cannot script — raising the IDE is the honest answer
+        // there, and it is what makes those rows clickable at all.
+        let activator = self.activator
+        let route = focusRoute(
+            for: session,
+            isPidAlive: registry.isPidAlive,
+            ownerBundleID: { pid in activator.owner(ofPid: pid)?.bundleID })
         switch route {
         case let .terminal(tty):
             let focuser = self.focuser

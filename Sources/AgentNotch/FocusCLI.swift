@@ -132,10 +132,23 @@ enum FocusCLI {
             print("claude processes: none with a terminal")
         } else {
             print("claude processes:")
+            let activator = inspectionActivator()
             for session in sessions {
                 let tty = session.tty ?? "(no tty)"
                 let cwd = session.cwd ?? "(cwd unknown)"
                 print("  pid \(session.pid)  tty \(tty)  \(cwd)")
+                // WHAT A CLICK WOULD DO, spelled out. A session in an IDE's
+                // integrated terminal has a real tty that Terminal.app cannot
+                // script, and without this line the difference between "focuses
+                // the tab" and "raises the IDE" is invisible until you click.
+                let owner = activator.owner(ofPid: session.pid)
+                let route = focusRoute(
+                    tty: session.tty,
+                    pid: session.pid,
+                    ownerBundleID: { _ in owner?.bundleID })
+                print("       owned by \(owner?.localizedName ?? "(no application)")"
+                    + "  \(owner?.bundleID ?? "")")
+                print("       click →  \(describe(route))")
             }
         }
         print("")
@@ -185,6 +198,37 @@ enum FocusCLI {
         }
 
         return blocked ? 1 : 0
+    }
+
+    // MARK: - Owner inspection
+
+    /// An activator that can RESOLVE but never activate.
+    ///
+    /// `--doctor` reports what a click would do; it must not be able to make it
+    /// happen. The `activate` seam is stubbed to `false` so a diagnostic can
+    /// never yank the user's frontmost app out from under them.
+    private static func inspectionActivator() -> SystemAppActivator {
+        SystemAppActivator(
+            resolve: { pid in
+                guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
+                return OwningApp(
+                    pid: pid,
+                    bundleID: app.bundleIdentifier,
+                    localizedName: app.localizedName ?? app.bundleIdentifier ?? "pid \(pid)")
+            },
+            activate: { _ in false }
+        )
+    }
+
+    private static func describe(_ route: FocusRoute) -> String {
+        switch route {
+        case let .terminal(tty):
+            return "focus the Terminal.app tab on \(tty)"
+        case let .activateApp(pid):
+            return "raise the application owning pid \(pid)"
+        case let .unavailable(reason):
+            return "nothing — \(reason)"
+        }
     }
 
     // MARK: - --geometry
