@@ -60,6 +60,12 @@ enum NotchListMetrics {
 struct NotchPanelView: View {
     let store: SessionStore
     let width: CGFloat
+    /// False when the panel is ordered out — no menu bar, because another app is
+    /// full screen, the bar is hidden, or the status item overflowed. The rows
+    /// only exist while `listHeight > 0`, so this is the one case where they can
+    /// be alive and unwatchable, and an orb spinning into a hidden window is
+    /// pure battery.
+    let isVisible: Bool
     /// Collapse SYNCHRONOUSLY, then focus. Never the other way round: holding a
     /// panel open across an app activation is a fight with the window server
     /// that we lose.
@@ -68,9 +74,22 @@ struct NotchPanelView: View {
     /// `NotchController`.
     let onInstallHook: () -> Void
 
+    /// The orb's box. Two points wider than the 14pt the SF Symbol sat in, which
+    /// the 32pt row absorbs — see `NotchListMetrics`, whose heights are pinned
+    /// constants precisely so the window can be sized before layout happens.
+    private static let orbSide: CGFloat = 16
+
     @State private var now = Date()
     @State private var hovered: String?
     @State private var installHovered = false
+
+    /// Read the same way `PillView` reads it. Not `@Environment` and not
+    /// observed: a computed read during `body`, which means toggling Reduce
+    /// Motion mid-session takes effect on the next redraw rather than instantly.
+    /// Matching the pill's existing behaviour beats being subtly different.
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
     /// ONE timer for the whole list. Sixty rows with a timer each is sixty
     /// run-loop sources to redraw text that changes once a second.
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -162,10 +181,24 @@ struct NotchPanelView: View {
     private func rowBody(_ row: SliceRow) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
-                Image(systemName: row.symbol)
-                    .font(.system(size: 11))
-                    .foregroundStyle(row.tint.notchColour)
-                    .frame(width: 14)
+                // THE THREE GATES, the same three the pill takes: this row is
+                // actually working, the panel is on screen, and Reduce Motion is
+                // off. A settled row shows the orb's rest frame — a picture, not
+                // an absence.
+                SessionOrb(
+                    tint: row.tint,
+                    spinning: row.session.state == .working
+                        && row.session.origin != .bootstrap
+                        && isVisible
+                        && !reduceMotion,
+                    // `globe`, not `orbits`. At row scale orbits resolves to
+                    // three rings carrying 39 dots and reads as noise; globe is
+                    // a lat/long field of 54 and still reads as a sphere. The
+                    // upstream names are verbs — this is not the app claiming
+                    // the session is "searching".
+                    mode: .globe,
+                    side: Self.orbSide
+                )
                 Text(row.label)
                     .font(.system(size: 12))
                     .lineLimit(1)

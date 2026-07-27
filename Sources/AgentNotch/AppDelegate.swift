@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// anything", and having no way back to a plain window would make a bad
     /// geometry bug indistinguishable from a dead app.
     private var sliceWindow: SliceWindow?
+    private var orbLabWindow: OrbLabWindow?
     /// Built on first use. An approval sheet for somebody's settings file has no
     /// business existing before they ask for one.
     private var installWindow: HookInstallWindow?
@@ -42,6 +43,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The orb lab is a drawing harness and nothing else: no sessions, no
+        // reaper, and above all no socket. Binding it would make the lab refuse
+        // to start whenever the real app is running — which is precisely when
+        // you want to open it and compare.
+        if mode == .orbLab {
+            uiLog.info("--orb-lab: orb tuning harness, no server and no notch")
+            let window = OrbLabWindow()
+            window.show()
+            self.orbLabWindow = window
+            return
+        }
+
         let activator = Self.makeActivator()
         let store = SessionStore(
             focuser: TerminalFocuser(
@@ -107,6 +120,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let window = SliceWindow(store: store) { [weak self] in self?.showInstallSheet() }
             window.show()
             self.sliceWindow = window
+        case .orbLab:
+            // Handled at the top of this method, before the server exists.
+            break
         }
 
         installSignalHandlers(server: server)

@@ -115,6 +115,7 @@ struct NotchChrome: View {
                 NotchPanelView(
                     store: store,
                     width: geometry.expandedFrame.width,
+                    isVisible: isVisible,
                     onRowTap: onRowTap,
                     onInstallHook: onInstallHook
                 )

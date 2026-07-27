@@ -12,6 +12,11 @@ enum LaunchMode {
     /// click anything at all", which is indistinguishable from the app being
     /// dead. A known-good fallback UI turns that into a one-flag diagnosis.
     case slice
+    /// The orb tuning harness, reachable via `--orb-lab`.
+    ///
+    /// `screencapture` is banned in this repo, so nobody building the orb can
+    /// see it. This mode is how the judgement gets handed to a person.
+    case orbLab
 }
 
 /// Headless entry points, handled before any UI is built.
@@ -57,7 +62,8 @@ enum FocusCLI {
 
     /// `--slice` is NOT handled by `run` — it does not exit, it selects a UI.
     static func launchMode(_ args: [String]) -> LaunchMode {
-        args.contains("--slice") ? .slice : .notch
+        if args.contains("--orb-lab") { return .orbLab }
+        return args.contains("--slice") ? .slice : .notch
     }
 
     // MARK: - Terminal liveness
