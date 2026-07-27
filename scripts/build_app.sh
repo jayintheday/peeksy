@@ -1,0 +1,111 @@
+#!/bin/bash
+# Assemble and ad-hoc sign dist/AgentNotch.app.
+#
+# Adapted from open-focus (MIT, © 2026 Filip Sokolowski) — see NOTICE.
+#
+# Usage:
+#   scripts/build_app.sh              build dist/AgentNotch.app
+#   scripts/build_app.sh --install    also copy it to ~/Applications
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+APP_NAME="AgentNotch"
+BUNDLE_ID="com.vijaypatel.agentnotch"
+VERSION="0.1.0"
+BINARY="AgentNotch"
+DIST="dist"
+APP="$DIST/$APP_NAME.app"
+HOOK_SRC="hooks/agent-notch-hook.sh"
+
+INSTALL=0
+for arg in "$@"; do
+    case "$arg" in
+        --install) INSTALL=1 ;;
+        *) echo "unknown argument: $arg" >&2; exit 2 ;;
+    esac
+done
+
+echo "==> Building release binary"
+swift build -c release
+BIN_DIR="$(swift build -c release --show-bin-path)"
+
+if [ ! -f "$BIN_DIR/$BINARY" ]; then
+    echo "error: expected binary at $BIN_DIR/$BINARY but it is missing" >&2
+    exit 1
+fi
+
+echo "==> Assembling $APP"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+cp "$BIN_DIR/$BINARY" "$APP/Contents/MacOS/$APP_NAME"
+
+if [ -f "AppIcon.icns" ]; then
+    cp "AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+else
+    echo "    note: AppIcon.icns not found — bundling without an icon"
+fi
+
+# The hook lives inside the bundle so `claude` invokes a stable path that picks
+# up every rebuild automatically. Defensive: the hook may not have landed yet.
+if [ -f "$HOOK_SRC" ]; then
+    cp "$HOOK_SRC" "$APP/Contents/Resources/agent-notch-hook.sh"
+    chmod +x "$APP/Contents/Resources/agent-notch-hook.sh"
+    echo "    bundled $HOOK_SRC"
+else
+    echo "    WARNING: $HOOK_SRC not found — bundling without the hook." >&2
+    echo "             Claude Code will not be able to report sessions." >&2
+fi
+
+# NSAppleEventsUsageDescription is mandatory, not cosmetic: without it the very
+# first Apple event fails with errAEEventNotPermitted (-1743), and on some macOS
+# versions the process is killed outright rather than merely denied.
+cat > "$APP/Contents/Info.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key><string>$APP_NAME</string>
+    <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+    <key>CFBundleName</key><string>$APP_NAME</string>
+    <key>CFBundleDisplayName</key><string>Agent Notch</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHumanReadableCopyright</key><string>© 2026 Vijay Patel. Portions © 2026 Filip Sokolowski (MIT).</string>
+    <key>NSAppleEventsUsageDescription</key><string>AgentNotch brings the Terminal window running your agent session to the front when you click it.</string>
+</dict>
+</plist>
+PLIST
+
+# Sign LAST — Info.plist and Resources are part of the code signature seal, so
+# anything written after this point invalidates it.
+# No --deep (deprecated, and there are no nested bundles to sign anyway).
+# --identifier is pinned so the signing identity can never drift from the plist.
+echo "==> Signing"
+xattr -cr "$APP"
+codesign --force --sign - --identifier "$BUNDLE_ID" "$APP"
+codesign --verify --verbose=2 "$APP"
+
+echo "==> Done: $APP"
+
+if [ "$INSTALL" -eq 1 ]; then
+    DEST="$HOME/Applications"
+    mkdir -p "$DEST"
+    echo "==> Installing to $DEST/$APP_NAME.app"
+    rm -rf "$DEST/$APP_NAME.app"
+    ditto "$APP" "$DEST/$APP_NAME.app"
+    echo "==> Installed: $DEST/$APP_NAME.app"
+    echo ""
+    echo "    NOTE: ad-hoc signing produces a new cdhash on every build, so macOS"
+    echo "    may silently deny Automation after a rebuild — focus clicks then fail"
+    echo "    with -1743 (errAEEventNotPermitted) and no prompt. If that happens:"
+    echo ""
+    echo "        tccutil reset AppleEvents $BUNDLE_ID"
+    echo ""
+    echo "    then click a session once to get a fresh permission prompt."
+fi
