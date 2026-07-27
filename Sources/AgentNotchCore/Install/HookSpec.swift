@@ -57,6 +57,28 @@ public enum HookSpec {
         return group
     }
 
+    /// JUST our block, ready to paste — the same shape as
+    /// `hooks/settings-snippet.json` but carrying a real resolved command.
+    ///
+    /// This exists so `--print-hook-json` can answer "what do I add?" without
+    /// answering "what else is in your settings file?". The obvious
+    /// implementation of that flag — print the merged result — is a privacy
+    /// problem the moment the project has users: the flag is documented as the
+    /// paste-it-in-yourself escape hatch, the universal support request is
+    /// "run this and paste the output", and a real `settings.json` carries
+    /// every other tool the user has hooked up. Nine lines are ours; the rest
+    /// is nobody's business.
+    ///
+    /// "What will change in MY file" is a different question with its own
+    /// answer already: the unified diff from `HookInstaller.preview`.
+    public static func snippet(command: String) -> [String: Any] {
+        var groups: [String: Any] = [:]
+        for spec in events {
+            groups[spec.event] = [group(command: command, matcher: spec.matcher)]
+        }
+        return [hooksKey: groups]
+    }
+
     /// The script's filename. The identity we recognise our own groups by.
     public static let scriptName = "agent-notch-hook.sh"
 

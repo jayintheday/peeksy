@@ -65,6 +65,86 @@ struct HookSpecTests {
         #expect(HookSpec.events.count == 9)
     }
 
+    // MARK: - snippet()
+
+    /// What `--print-hook-json` emits. The flag used to print the MERGED file,
+    /// which is a privacy problem rather than a correctness one: the documented
+    /// use is "paste it in yourself", the universal support request is "run this
+    /// and paste the output", and a real settings.json carries every other tool
+    /// the user has hooked up. These pin it to our block and nothing else.
+
+    @Test("snippet() is our nine registrations and nothing else")
+    func snippetIsOnlyOurBlock() throws {
+        let snippet = HookSpec.snippet(command: "/x/agent-notch-hook.sh")
+
+        // Exactly one top-level key. A second one would mean settings leaked in.
+        #expect(snippet.keys.sorted() == [HookSpec.hooksKey])
+
+        let hooks = try #require(snippet[HookSpec.hooksKey] as? [String: Any])
+        #expect(Set(hooks.keys) == Set(HookSpec.events.map(\.event)))
+
+        for spec in HookSpec.events {
+            let groups = try #require(hooks[spec.event] as? [Any])
+            #expect(groups.count == 1, "\(spec.event) should carry exactly one group — ours")
+            let group = try #require(groups[0] as? [String: Any])
+            #expect(HookSpec.matcher(of: group) == spec.matcher)
+            #expect((group[HookSpec.matcherKey] != nil) == (spec.matcher != nil))
+        }
+    }
+
+    @Test("snippet() carries the command verbatim, shell quoting and all")
+    func snippetCarriesTheCommand() throws {
+        let quoted = HookSpec.shellQuoted("/Users/x/Library/Application Support/AgentNotch/agent-notch-hook.sh")
+        #expect(quoted.hasPrefix("'"), "a path with a space must arrive quoted or this test proves nothing")
+
+        let hooks = try #require(
+            HookSpec.snippet(command: quoted)[HookSpec.hooksKey] as? [String: Any])
+        for spec in HookSpec.events {
+            let group = try #require((hooks[spec.event] as? [Any])?.first as? [String: Any])
+            let entry = try #require((group[HookSpec.hooksKey] as? [Any])?.first as? [String: Any])
+            #expect(entry[HookSpec.commandKey] as? String == quoted)
+            #expect(entry[HookSpec.typeKey] as? String == HookSpec.commandType)
+        }
+    }
+
+    /// The regression that matters. Nothing about a user's existing settings can
+    /// reach this output, because the output is not derived from it at all.
+    @Test("snippet() leaks nothing from a populated settings file")
+    func snippetLeaksNothing() throws {
+        let text = try SettingsIO.canonicalText(
+            HookSpec.snippet(command: SettingsFixture.ourCommand))
+
+        // Two other tools' hook commands, and the top-level keys and events that
+        // belong to nobody but the user.
+        for secret in [
+            SettingsFixture.toolOne,
+            SettingsFixture.toolTwo,
+            "\"model\"",
+            "\"permissions\"",
+            "SubagentStop",
+            "PreCompact",
+        ] {
+            #expect(!text.contains(secret), "--print-hook-json emitted \(secret)")
+        }
+
+        // And it really is small: 9 events, one group each, nothing else.
+        #expect(text.components(separatedBy: HookSpec.scriptName).count - 1 == 9)
+    }
+
+    @Test("snippet() and settings-snippet.json are the same document")
+    func snippetMatchesTheCommittedFile() throws {
+        // The placeholder the committed file ships with.
+        let placeholder = "/PATH/TO/agent-notch-hook.sh"
+        let fromFile = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: Self.snippetURL))
+                as? [String: Any])
+
+        #expect(
+            try SettingsIO.canonicalText(fromFile)
+                == SettingsIO.canonicalText(HookSpec.snippet(command: placeholder)),
+            "hooks/settings-snippet.json has drifted from HookSpec.snippet()")
+    }
+
     @Test("group() omits the matcher key entirely rather than writing null")
     func groupOmitsAbsentMatcher() {
         let none = HookSpec.group(command: "/x", matcher: nil)

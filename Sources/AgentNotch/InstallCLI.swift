@@ -179,9 +179,11 @@ enum InstallCLI {
 
         let command = HookSpec.shellQuoted(options.hookPath ?? SupportPaths.hookScript().path)
         do {
-            let preview = try HookInstaller(settingsURL: options.settingsURL, command: command)
-                .preview(.install)
-            print(preview.afterText, terminator: "")
+            // OUR block only — never the merged file. See `HookSpec.snippet`.
+            // It follows that this path no longer reads settings.json at all,
+            // so it cannot fail on a settings file that is missing or broken,
+            // which is exactly when somebody reaches for this flag.
+            print(try SettingsIO.canonicalText(HookSpec.snippet(command: command)), terminator: "")
             return 0
         } catch {
             return fail(describe(error))
@@ -247,8 +249,9 @@ enum InstallCLI {
 
     private static func escapeHatch(_ options: Options) -> String {
         """
-        You can install by hand instead — this prints the exact merged file:
-          AgentNotch --print-hook-json --settings \(options.settingsURL.path)
+        You can install by hand instead — this prints the block to merge into
+        the "hooks" object of \(options.settingsURL.lastPathComponent):
+          AgentNotch --print-hook-json
         """
     }
 
@@ -282,7 +285,7 @@ enum InstallCLI {
         printErr("usage:")
         printErr("  AgentNotch --install-hook   [--yes] [--dry-run] [--settings PATH] [--hook-path PATH]")
         printErr("  AgentNotch --uninstall-hook [--yes] [--dry-run] [--settings PATH]")
-        printErr("  AgentNotch --print-hook-json            [--settings PATH] [--hook-path PATH]")
+        printErr("  AgentNotch --print-hook-json            [--hook-path PATH]")
         return 2
     }
 

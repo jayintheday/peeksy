@@ -138,9 +138,14 @@ running — `scripts/doctor.sh` answers both. The hook is intentionally silent o
 every failure, so it will never tell you itself.
 
 **You would rather edit `settings.json` by hand.** `AgentNotch
---print-hook-json` prints what your settings file should look like with the hook
-merged in. Note it prints the *whole merged file*, not just the hook block, so
-don't paste it into a public issue.
+--print-hook-json` prints just AgentNotch's block — merge its nine entries into
+your `hooks` object. It never reads your settings file, so it also works when
+that file is missing or has been broken by a half-finished edit, and it is safe
+to paste into a bug report.
+
+**You want to see what an install would change.** That is the other question,
+and it has its own answer: `scripts/install_hook.sh --dry-run` shows a unified
+diff against your real file.
 
 ## Uninstalling
 
