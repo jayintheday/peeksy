@@ -91,11 +91,15 @@ struct NotchPanelView: View {
     }
 
     private var rows: [SliceRow] {
-        // Reading `ownerNameGeneration` registers the dependency that makes a
+        // Reading these generations registers the dependencies that make a
         // late-resolved app name ("Claude", for the desktop app's embedded
-        // agent) repaint its row.
+        // agent) or a late-resolved task title repaint its row.
         _ = store.ownerNameGeneration
-        return SliceRow.build(from: store.rows, ownerName: store.ownerName(forPid:))
+        _ = store.taskTitleGeneration
+        return SliceRow.build(
+            from: store.rows,
+            ownerName: store.ownerName(forPid:),
+            taskTitle: store.taskTitle(forSessionID:))
     }
 
     // MARK: Header

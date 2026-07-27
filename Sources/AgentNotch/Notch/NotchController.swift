@@ -210,7 +210,14 @@ final class NotchController {
     }
 
     private func currentContentHeight() -> CGFloat {
-        let rows = SliceRow.build(from: store.rows, ownerName: store.ownerName(forPid:))
+        // Must be built EXACTLY as the view builds it, task titles included: the
+        // height is a step function of `detail != nil`, so a row that has a
+        // subtitle here and not there is the window drawing content it did not
+        // make room for.
+        let rows = SliceRow.build(
+            from: store.rows,
+            ownerName: store.ownerName(forPid:),
+            taskTitle: store.taskTitle(forSessionID:))
         return NotchListMetrics.contentHeight(
             rows: rows, tccBlocked: store.tccBlocked, hookInstalled: store.hookInstalled)
     }
@@ -538,6 +545,10 @@ final class NotchController {
             _ = store.rows
             _ = store.tccBlocked
             _ = store.ownerNameGeneration
+            // A resolved task title gives a row a second line it did not have,
+            // and `rowHeight(hasDetail:)` is a step function — so this is a
+            // content-height change, not just a repaint.
+            _ = store.taskTitleGeneration
             // The empty state is TALLER while the hook is missing, so the probe
             // flipping is a content-height change like any other.
             _ = store.hookInstalled

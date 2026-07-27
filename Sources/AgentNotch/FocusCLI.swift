@@ -40,6 +40,9 @@ enum FocusCLI {
         if arguments.contains("--capture-report") {
             return captureReport(arguments)
         }
+        if arguments.contains("--transcript-title") {
+            return transcriptTitle(arguments)
+        }
         if arguments.contains("--doctor") {
             return doctor()
         }
@@ -227,6 +230,40 @@ enum FocusCLI {
         print("capture: \(url.path)")
         print("")
         print(CaptureReport.parse(text).description)
+        return 0
+    }
+
+    // MARK: - --transcript-title
+
+    /// Resolve a session's task title from its transcript. Read-only.
+    ///
+    /// Exists for the same reason `--capture-report` does: the title comes from a
+    /// file this app does not own, in a format nobody documents, so the parse has
+    /// to be checkable against a real transcript without launching the app or
+    /// waiting for a session to reach its thirteenth message.
+    private static func transcriptTitle(_ arguments: [String]) -> Int32 {
+        let index = arguments.firstIndex(of: "--transcript-title")!
+        guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") else {
+            printErr("usage: AgentNotch --transcript-title <path to a session .jsonl>")
+            printErr("   e.g. ~/.claude/projects/<slug>/<session-id>.jsonl")
+            return 2
+        }
+        let path = (arguments[index + 1] as NSString).expandingTildeInPath
+
+        guard let tail = TranscriptTitleReader.system.readTail(path, TranscriptTitle.tailBytes) else {
+            printErr("cannot read \(path)")
+            return 1
+        }
+        print("transcript: \(path)")
+        print("tail read:  \(TranscriptTitle.tailBytes) bytes max, \(tail.utf8.count) decoded")
+
+        guard let title = TranscriptTitle.parse(tail: tail) else {
+            // Not a failure. 1 690 of 1 881 transcripts on this machine have no
+            // record, and the first one lands ~13 messages in.
+            print("title:      (none in the tail — session too young, or none written)")
+            return 0
+        }
+        print("title:      \(title)")
         return 0
     }
 

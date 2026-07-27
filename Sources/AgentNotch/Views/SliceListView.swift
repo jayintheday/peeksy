@@ -27,61 +27,29 @@ struct SliceRow: Identifiable, Equatable {
     /// Build the visible rows from a registry snapshot.
     ///
     /// `sessions` arrives already ordered by the registry; this never re-sorts.
+    /// The two text lines come from `SessionRowTextBuilder` in Core — they are
+    /// the part of a row that can be wrong, so they live where tests can reach
+    /// them. What is left here is a switch over an enum.
     static func build(
         from sessions: [Session],
-        ownerName: (Int32) -> String?
+        ownerName: (Int32) -> String?,
+        taskTitle: (String) -> String?
     ) -> [SliceRow] {
-        // A project can legitimately have two agents in it (two tabs, same repo).
-        // Showing "agent-notch" twice is indistinguishable from a duplicate-row
-        // bug, so both get disambiguated — never just the second one.
-        var projectCounts: [String: Int] = [:]
-        for session in sessions {
-            guard let key = ProjectLabel.projectKey(session.cwd) else { continue }
-            projectCounts[key, default: 0] += 1
-        }
+        let texts = SessionRowTextBuilder.build(
+            sessions: sessions, taskTitle: taskTitle, ownerName: ownerName)
 
-        return sessions.map { session in
-            let hasTerminal = normalizeTty(session.tty) != nil
-            let owner = session.pid.flatMap(ownerName)
-            var label = self.label(for: session, hasTerminal: hasTerminal, owner: owner)
-
-            if let key = ProjectLabel.projectKey(session.cwd),
-               projectCounts[key, default: 0] > 1,
-               let tty = normalizeTty(session.tty) {
-                label += " · \(tty)"
-            }
-
-            // A real tty owned by something other than Terminal.app is running
-            // inside an IDE's integrated terminal (Zed, VS Code, Cursor…) — a
-            // plain cwd, or even no cwd yet for a not-yet-adopted bootstrap row,
-            // otherwise reads exactly like an ordinary Terminal session.
-            if hasTerminal, let owner {
-                label += " · \(owner)"
-            }
-
-            return SliceRow(
+        return zip(sessions, texts).map { session, text in
+            SliceRow(
                 id: session.id,
                 session: session,
-                label: label,
+                label: text.title,
                 stateText: stateText(for: session),
                 symbol: symbol(for: session),
-                detail: session.pendingPermission?.summary ?? session.lastToolSummary,
-                hasTerminal: hasTerminal,
+                detail: text.subtitle,
+                hasTerminal: normalizeTty(session.tty) != nil,
                 tint: tint(for: session)
             )
         }
-    }
-
-    private static func label(
-        for session: Session,
-        hasTerminal: Bool,
-        owner: String?
-    ) -> String {
-        if let project = ProjectLabel.display(session.cwd) { return project }
-        // No cwd. For a tty-less session the owning application IS the most
-        // useful identity we have ("Claude" for the desktop app's embedded agent).
-        if !hasTerminal, let owner { return owner }
-        return session.source.displayName
     }
 
     private static func stateText(for session: Session) -> String {
@@ -163,10 +131,14 @@ struct SliceListView: View {
     }
 
     private var rows: [SliceRow] {
-        // Reading `ownerNameGeneration` registers the dependency that makes a
-        // late-resolved app name repaint the row.
+        // Reading these generations registers the dependencies that make a
+        // late-resolved app name or task title repaint the row.
         _ = store.ownerNameGeneration
-        return SliceRow.build(from: store.rows, ownerName: store.ownerName(forPid:))
+        _ = store.taskTitleGeneration
+        return SliceRow.build(
+            from: store.rows,
+            ownerName: store.ownerName(forPid:),
+            taskTitle: store.taskTitle(forSessionID:))
     }
 
     private var list: some View {

@@ -90,18 +90,46 @@ final class SessionStore {
     /// pid in it.)
     private(set) var ownerNameGeneration = 0
 
+    /// session id → transcript path, learned from the hook envelope. Recorded
+    /// non-nil-only, the same discipline `SessionRegistry.apply` uses for tty and
+    /// cwd: a later event must not be able to null out a path we already have.
+    @ObservationIgnored private var transcriptPaths: [String: String] = [:]
+    /// session id → Claude Code's own name for the task, read out of the
+    /// transcript. Absent until the agent has written one (~13 messages in).
+    @ObservationIgnored private var taskTitles: [String: String] = [:]
+    /// session id → when we last looked. The whole refresh policy lives in the
+    /// comparison against `Session.updatedAt`, which is what stops a finished
+    /// session being re-read every 15 s until it is reaped.
+    @ObservationIgnored private var titleReadAt: [String: Date] = [:]
+    /// Bumped whenever a title actually changes, for the same reason
+    /// `ownerNameGeneration` exists — the dictionary itself is
+    /// observation-ignored so a per-row read does not register a dependency on
+    /// every session in it.
+    private(set) var taskTitleGeneration = 0
+
     @ObservationIgnored let sessionCounts = SessionCountMirror()
 
     @ObservationIgnored private var registry: SessionRegistry
     @ObservationIgnored private let focuser: TerminalFocuser
     @ObservationIgnored private let activator: any AppActivating
     @ObservationIgnored private let ownerLookup: @Sendable (Int32) -> OwningApp?
+    @ObservationIgnored private let titleReader: TranscriptTitleReader
 
     /// Focus work runs here. `TerminalFocuser` spawns `osascript` and
     /// `activate` talks to the window server; neither may ever run on the main
     /// thread with a 5 s watchdog behind it.
     @ObservationIgnored private let focusQueue = DispatchQueue(
         label: "com.agentnotch.focus", qos: .userInitiated)
+
+    /// Transcript reads run here — NOT on `focusQueue`.
+    ///
+    /// `focusQueue` is serial and it is the click path. Queueing a batch of file
+    /// reads onto it would put disk latency in front of the app's primary
+    /// interaction. This is a third dispatch queue, not a second ingest edge:
+    /// the "one cross-actor edge" invariant is about the socket hop that admits
+    /// events to the model, and this queue admits nothing.
+    @ObservationIgnored private let titleQueue = DispatchQueue(
+        label: "com.agentnotch.title", qos: .utility)
 
     @ObservationIgnored private var reapTimer: Timer?
     @ObservationIgnored private var snapshotScheduled = false
@@ -115,17 +143,22 @@ final class SessionStore {
     @ObservationIgnored private let coalesceInterval: Duration = .milliseconds(100)
     /// `reap` is idempotent, so this is a knob and not a correctness constant.
     @ObservationIgnored private let reapInterval: TimeInterval = 15
+    /// How stale a title we ALREADY have is allowed to get. Only reached by a
+    /// session that keeps working; see `refreshTitles`.
+    @ObservationIgnored private let titleRefreshInterval: TimeInterval = 120
 
     init(
         registry: SessionRegistry = SessionRegistry(),
         focuser: TerminalFocuser,
         activator: any AppActivating,
-        ownerLookup: @escaping @Sendable (Int32) -> OwningApp?
+        ownerLookup: @escaping @Sendable (Int32) -> OwningApp?,
+        titleReader: TranscriptTitleReader = .system
     ) {
         self.registry = registry
         self.focuser = focuser
         self.activator = activator
         self.ownerLookup = ownerLookup
+        self.titleReader = titleReader
         publish()
     }
 
@@ -134,8 +167,15 @@ final class SessionStore {
     /// Fold one hook event in. Called from the io queue via a MainActor hop.
     func ingest(_ envelope: HookEnvelope) {
         switch registry.apply(envelope, now: envelope.receivedAt) {
-        case .updated, .removed:
-            break
+        case .updated:
+            // The envelope carries the transcript path but never the title
+            // itself; reading it is deferred to the reaper. A per-event read is
+            // not an option — one captured session produced 281 events.
+            if let path = envelope.transcriptPath, !path.isEmpty {
+                transcriptPaths[envelope.sessionID] = path
+            }
+        case let .removed(id):
+            forgetTitle(id)
         case let .dropped(reason):
             Log.registry.error("dropped event: \(reason, privacy: .public)")
             return
@@ -201,8 +241,91 @@ final class SessionStore {
                 permissions expired \(result.permissionsExpired.count, privacy: .public)
                 """)
         }
+        for id in result.removed { forgetTitle(id) }
         hookInstalled = HookProbe.isInstalled()
+        refreshTitles()
         publish()
+    }
+
+    // MARK: - Task titles
+
+    /// Claude Code's own one-line name for what a session is doing.
+    func taskTitle(forSessionID id: String) -> String? { taskTitles[id] }
+
+    /// Re-read the transcripts that could have something new to say.
+    ///
+    /// Deliberately driven by the existing 15 s reaper rather than a timer of its
+    /// own: this app has no `TimelineView` and no periodic run-loop source by
+    /// policy, and a title is stable for minutes — 15 s of latency on it is
+    /// invisible.
+    ///
+    /// Two gates, and a session must clear both:
+    ///
+    /// 1. **It did something since we last looked** (`updatedAt > readAt`).
+    ///    Nothing can have been appended to the transcript of a session that has
+    ///    not moved, so a finished row is read once more and then left alone
+    ///    rather than re-read every tick until it is reaped.
+    /// 2. **We do not already have a title, or the backoff has elapsed.** A
+    ///    session mid-turn moves on every single tick, so gate 1 alone would
+    ///    re-read 256 KB every 15 s per session for as long as the app is up —
+    ///    and this app runs all day. A title we already have changes rarely
+    ///    (measured: once, mid-session, in 93 of 1 881 transcripts), so once it
+    ///    is known the read drops to `titleRefreshInterval`. While it is UNKNOWN
+    ///    there is no backoff: that is the ~13-messages-in window where the row
+    ///    is still showing its project label and we want the title as it lands.
+    private func refreshTitles() {
+        let now = Date()
+        var due: [(id: String, path: String)] = []
+        for session in registry.ordered() {
+            guard let path = transcriptPaths[session.id] else { continue }
+            if let readAt = titleReadAt[session.id] {
+                guard session.updatedAt > readAt else { continue }
+                if taskTitles[session.id] != nil,
+                   now.timeIntervalSince(readAt) < titleRefreshInterval { continue }
+            }
+            // Stamped BEFORE the read, not after, so a transcript that has no
+            // title yet is not retried until the session does something else.
+            titleReadAt[session.id] = now
+            due.append((session.id, path))
+        }
+        guard !due.isEmpty else { return }
+
+        // Off the main actor. The read is sub-millisecond warm, but a stalled
+        // network home directory would beachball the panel, and file I/O on the
+        // main thread is not a thing this app does.
+        let reader = titleReader
+        let batch = due
+        titleQueue.async { [weak self] in
+            let resolved = batch.compactMap { item -> (String, String)? in
+                guard let title = reader.title(atPath: item.path) else { return nil }
+                return (item.id, title)
+            }
+            guard !resolved.isEmpty else { return }
+            Task { @MainActor in self?.applyTitles(resolved) }
+        }
+    }
+
+    private func applyTitles(_ resolved: [(String, String)]) {
+        var changed = false
+        for (id, title) in resolved where taskTitles[id] != title {
+            // Logged because the title comes from a file this app does not own,
+            // in an undocumented format, and "the row still says the project" is
+            // otherwise indistinguishable from "the transcript has no title yet".
+            uiLog.info("title for \(id, privacy: .public): \(title, privacy: .public)")
+            taskTitles[id] = title
+            changed = true
+        }
+        // Only on a real change: `Observation` does not diff, and bumping this
+        // would invalidate every row's body for nothing. The bump is the whole
+        // notification — `rows` is untouched, so `publish()` would be a no-op.
+        guard changed else { return }
+        taskTitleGeneration += 1
+    }
+
+    private func forgetTitle(_ id: String) {
+        transcriptPaths[id] = nil
+        taskTitles[id] = nil
+        titleReadAt[id] = nil
     }
 
     // MARK: - Focus
