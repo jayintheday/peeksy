@@ -45,7 +45,7 @@ final class SessionCountMirror: @unchecked Sendable {
 enum HookProbe {
     static func isInstalled(
         settingsURL: URL = SupportPaths.claudeSettings(),
-        command: String = SupportPaths.hookScript().path
+        command: String = HookSpec.shellQuoted(SupportPaths.hookScript().path)
     ) -> Bool {
         HookInstaller(settingsURL: settingsURL, command: command).isInstalled()
     }

@@ -57,6 +57,45 @@ public enum HookSpec {
         return group
     }
 
+    /// The script's filename. The identity we recognise our own groups by.
+    public static let scriptName = "agent-notch-hook.sh"
+
+    /// A command string safe to hand to `/bin/sh -c`.
+    ///
+    /// Claude Code does not `exec` the command — it runs it through a shell,
+    /// which word-splits. A path with a space in it therefore has to be quoted
+    /// or it dies before the script is ever reached. Quoting is applied ONLY
+    /// when it is needed, so the common case stays a plain readable path that
+    /// works whether the consumer uses a shell or `exec`.
+    public static func shellQuoted(_ path: String) -> String {
+        let safe = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/._-+=:,@%")
+        guard path.unicodeScalars.contains(where: { !safe.contains($0) }) else { return path }
+        // POSIX single-quoting: everything is literal, and an embedded quote is
+        // spelled by closing, escaping, and reopening.
+        return "'" + path.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+    }
+
+    /// Undo `shellQuoted`, so a stored command can be compared to a path.
+    public static func unquoted(_ command: String) -> String {
+        let trimmed = command.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 2, trimmed.hasPrefix("'"), trimmed.hasSuffix("'") else { return trimmed }
+        return String(trimmed.dropFirst().dropLast()).replacingOccurrences(of: #"'\''"#, with: "'")
+    }
+
+    /// Is this command string one of ours?
+    ///
+    /// Exact match on the command we are installing, OR any command whose file
+    /// is named `agent-notch-hook.sh`. The second clause is what lets an install
+    /// MIGRATE a registration written by an older version — without it, moving
+    /// the script would leave nine dead groups behind and add nine live ones
+    /// beside them. No other tool ships a file by that name.
+    public static func isOurCommand(_ command: String, desired: String) -> Bool {
+        if command == desired { return true }
+        let path = unquoted(command)
+        return path == unquoted(desired) || path.hasSuffix("/" + scriptName) || path == scriptName
+    }
+
     /// Matcher of an existing group, with `""` folded onto `nil`.
     ///
     /// Claude Code treats an absent matcher and an empty one the same way, so

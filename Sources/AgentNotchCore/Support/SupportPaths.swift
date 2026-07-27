@@ -20,12 +20,38 @@ public enum SupportPaths {
             .appendingPathComponent("AgentNotch", isDirectory: true)
     }
 
-    /// The installed hook script — the exact string written into
+    /// The installed hook script — the exact path written into
     /// `~/.claude/settings.json`.
+    ///
+    /// **`~/.agent-notch/`, and NOT Application Support.** Claude Code executes
+    /// a hook command through `/bin/sh -c`, which word-splits it, so a command
+    /// containing `Application Support` dies as
+    /// `/bin/sh: /Users/…/Library/Application: No such file or directory` — and
+    /// because the failure is reported by Claude Code rather than by us, and the
+    /// hook contract is fail-open silence, it looks exactly like an app that is
+    /// simply never told anything.
+    ///
+    /// The two other tools installed on this machine both use space-free paths
+    /// (`~/.othertool/hooks/…`, `~/Code/some-project/hooks/…`). This matches
+    /// them. `shellQuoted` still guards the case where `$HOME` itself has a
+    /// space in it.
     public static func hookScript(
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL {
-        directory(home: home).appendingPathComponent("agent-notch-hook.sh", isDirectory: false)
+        home
+            .appendingPathComponent(".agent-notch", isDirectory: true)
+            .appendingPathComponent("agent-notch-hook.sh", isDirectory: false)
+    }
+
+    /// Paths this app has registered in the past.
+    ///
+    /// Kept so an install can MIGRATE a stale registration rather than leaving a
+    /// dead one behind next to a live one. Recognition is by script name (see
+    /// `HookSpec.isOurCommand`); this list is for cleaning up the files.
+    public static func legacyHookScripts(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> [URL] {
+        [directory(home: home).appendingPathComponent(bundledHookName, isDirectory: false)]
     }
 
     /// Claude Code's user settings. Read constantly, written only by

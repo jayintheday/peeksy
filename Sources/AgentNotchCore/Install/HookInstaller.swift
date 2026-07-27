@@ -54,7 +54,7 @@ public struct HookInstaller: Sendable {
 
     public init(
         settingsURL: URL = SupportPaths.claudeSettings(),
-        command: String = SupportPaths.hookScript().path
+        command: String = HookSpec.shellQuoted(SupportPaths.hookScript().path)
     ) {
         self.settingsURL = settingsURL
         self.command = command

@@ -33,7 +33,7 @@ enum InstallCLI {
         var yes = false
         var dryRun = false
         var settingsURL = SupportPaths.claudeSettings()
-        /// `nil` means "the standard Application Support path, synced from the bundle".
+        /// `nil` means "the standard ~/.agent-notch path, synced from the bundle".
         var hookPath: String?
     }
 
@@ -86,10 +86,9 @@ enum InstallCLI {
         }
 
         // `--hook-path` names a script the caller manages; anything else is the
-        // standard Application Support copy, which we own and keep in step with
-        // the bundle.
+        // copy in ~/.agent-notch that we own and keep in step with the bundle.
         let managingScript = options.hookPath == nil && action == .install
-        let command = options.hookPath ?? SupportPaths.hookScript().path
+        let command = HookSpec.shellQuoted(options.hookPath ?? SupportPaths.hookScript().path)
 
         print("AgentNotch — \(action.rawValue) hook")
         print("")
@@ -178,7 +177,7 @@ enum InstallCLI {
         case let .failure(complaint): return usage(complaint.description)
         }
 
-        let command = options.hookPath ?? SupportPaths.hookScript().path
+        let command = HookSpec.shellQuoted(options.hookPath ?? SupportPaths.hookScript().path)
         do {
             let preview = try HookInstaller(settingsURL: options.settingsURL, command: command)
                 .preview(.install)

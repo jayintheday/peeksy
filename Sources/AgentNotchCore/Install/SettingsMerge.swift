@@ -112,11 +112,24 @@ public enum SettingsMerge {
         guard let hooks = group[HookSpec.hooksKey] as? [Any], !hooks.isEmpty else { return .notOurs }
         var mine = 0
         for entry in hooks {
-            guard let hook = entry as? [String: Any] else { continue }
-            if hook[HookSpec.commandKey] as? String == command { mine += 1 }
+            guard let hook = entry as? [String: Any],
+                  let stored = hook[HookSpec.commandKey] as? String
+            else { continue }
+            // Recognised by script name as well as by exact string, so a
+            // registration written by an older version is MIGRATED rather than
+            // orphaned. See `HookSpec.isOurCommand`.
+            if HookSpec.isOurCommand(stored, desired: command) { mine += 1 }
         }
         if mine == 0 { return .notOurs }
         return mine == hooks.count ? .exclusive : .shared
+    }
+
+    /// The command string a group actually carries, when it is exclusively ours.
+    private static func storedCommand(of group: [String: Any]) -> String? {
+        guard let hooks = group[HookSpec.hooksKey] as? [Any], hooks.count == 1,
+              let hook = hooks[0] as? [String: Any]
+        else { return nil }
+        return hook[HookSpec.commandKey] as? String
     }
 
     // MARK: - Install
@@ -136,11 +149,15 @@ public enum SettingsMerge {
                     // Somebody hand-merged our command in beside another tool's.
                     // Rewriting that group would delete their hook.
                     disposition = .unchanged
-                } else if HookSpec.matcher(of: match.group) == spec.matcher {
+                } else if HookSpec.matcher(of: match.group) == spec.matcher,
+                          storedCommand(of: match.group) == command {
                     disposition = .unchanged
                 } else {
-                    // A wrong matcher means the hook never fires. The group is
-                    // ours and ours alone, so rewriting it destroys nothing.
+                    // Either the matcher is wrong — in which case the hook never
+                    // fires — or the command points at a path we no longer
+                    // install to. Both mean a registration that does nothing.
+                    // The group is ours and ours alone, so rewriting it destroys
+                    // nothing, and it is what migrates an old install in place.
                     groups[match.index] = HookSpec.group(command: command, matcher: spec.matcher)
                     disposition = .repaired
                 }
