@@ -178,6 +178,9 @@ struct HookCommandTests {
     @Test("another tool's hook is never ours")
     func rejectsForeign() {
         let new = "/Users/v/.peeksy/peeksy-hook.sh"
+        // The shapes real foreign hooks come in: a dotfile directory under
+        // $HOME, and a script checked into a project. Both are shapes taken
+        // from live settings.json files; the names are invented.
         #expect(!HookSpec.isOurCommand("/Users/v/.othertool/hooks/notify.sh", desired: new))
         #expect(!HookSpec.isOurCommand("/Users/v/Code/some-project/hooks/some-hook.sh", desired: new))
         #expect(!HookSpec.isOurCommand("/usr/bin/true", desired: new))

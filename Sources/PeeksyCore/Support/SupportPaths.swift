@@ -31,10 +31,11 @@ public enum SupportPaths {
     /// hook contract is fail-open silence, it looks exactly like an app that is
     /// simply never told anything.
     ///
-    /// The two other tools installed on this machine both use space-free paths
-    /// (`~/.othertool/hooks/…`, `~/Code/some-project/hooks/…`). This matches
-    /// them. `shellQuoted` still guards the case where `$HOME` itself has a
-    /// space in it.
+    /// This is not a guess: every other hook-installing tool found on a real
+    /// machine registers a space-free path under `$HOME` (`~/.<tool>/hooks/…`),
+    /// which is the same conclusion reached the same way. This matches them.
+    /// `shellQuoted` still guards the case where `$HOME` ITSELF has a space in
+    /// it, which no amount of choosing our own path can avoid.
     public static func hookScript(
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL {

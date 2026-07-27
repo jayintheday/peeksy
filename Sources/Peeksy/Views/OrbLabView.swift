@@ -18,12 +18,18 @@ struct OrbLabView: View {
     /// upstream actually tuned, and 12 is where it should visibly fall apart.
     private static let sizes: [CGFloat] = [12, 14, 16, 20, 24]
 
+    /// Placeholder project names, deliberately generic — this harness ships in
+    /// a public repo and sample data should not tell anyone what else is on the
+    /// author's disk. Lengths are kept spread from 6 to 15 characters on
+    /// purpose: this view exists to judge a row at five orb sizes, and a row
+    /// whose label never approaches the truncation point would not be judging
+    /// the case that actually matters.
     private static let states: [(tint: RowTint, symbol: String, label: String, text: String)] = [
         (.working, "circle.dotted", "peeksy", "working"),
         (.attention, "exclamationmark.circle.fill", "customer-portal", "needs you"),
-        (.stale, "clock", "some-project", "stalled"),
-        (.done, "checkmark.circle", "othertool", "done"),
-        (.idle, "circle", "localtool", "idle"),
+        (.stale, "clock", "media-encoder", "stalled"),
+        (.done, "checkmark.circle", "notebook", "done"),
+        (.idle, "circle", "runner", "idle"),
         (.unknown, "questionmark.circle", "unknown-repo", "waiting…"),
     ]
 
