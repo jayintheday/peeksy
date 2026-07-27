@@ -19,6 +19,7 @@ final class NotchModel {
 
     @ObservationIgnored var onPillTap: () -> Void = {}
     @ObservationIgnored var onRowTap: (Session) -> Void = { _ in }
+    @ObservationIgnored var onInstallHook: () -> Void = {}
 
     init(geometry: NotchGeometry) {
         self.geometry = geometry
@@ -77,6 +78,12 @@ final class NotchController {
 
     private(set) var phase: NotchPhase = .collapsed
     private(set) var geometry: NotchGeometry?
+
+    /// Set by `AppDelegate`. The empty state's "Install hook" affordance ends up
+    /// here; the controller collapses first and then hands off, for the same
+    /// reason a row tap does — holding the panel open across another window
+    /// coming forward is a fight with the window server that we lose.
+    var onInstallHookRequested: (() -> Void)?
 
     /// MANDATORY, not defensive.
     ///
@@ -147,6 +154,10 @@ final class NotchController {
     private func wire(model: NotchModel, hosting: FirstMouseHostingView<NotchRootView>, panel: NotchPanel) {
         model.onPillTap = { [weak self] in self?.togglePin() }
         model.onRowTap = { [weak self] session in self?.handleRowTap(session) }
+        model.onInstallHook = { [weak self] in
+            self?.collapse()
+            self?.onInstallHookRequested?()
+        }
 
         hosting.onMouseEntered = { [weak self] in self?.hover.pointerEnteredBand() }
         hosting.onMouseExited = { [weak self] in self?.hover.pointerExitedBand() }
@@ -197,7 +208,8 @@ final class NotchController {
 
     private func currentContentHeight() -> CGFloat {
         let rows = SliceRow.build(from: store.rows, ownerName: store.ownerName(forPid:))
-        return NotchListMetrics.contentHeight(rows: rows, tccBlocked: store.tccBlocked)
+        return NotchListMetrics.contentHeight(
+            rows: rows, tccBlocked: store.tccBlocked, hookInstalled: store.hookInstalled)
     }
 
     /// Recompute and, if anything moved, `setFrame` IN PLACE.
@@ -520,6 +532,9 @@ final class NotchController {
             _ = store.rows
             _ = store.tccBlocked
             _ = store.ownerNameGeneration
+            // The empty state is TALLER while the hook is missing, so the probe
+            // flipping is a content-height change like any other.
+            _ = store.hookInstalled
         } onChange: {
             // `onChange` fires BEFORE the value is applied, hence the hop.
             Task { @MainActor [weak self] in

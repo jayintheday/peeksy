@@ -31,6 +31,12 @@ enum FocusCLI {
             let tty = index + 1 < arguments.count ? arguments[index + 1] : nil
             return focus(tty: tty)
         }
+        // Before --doctor and before anything that builds UI. The installer
+        // touches ~/.claude/settings.json and must never share a process with a
+        // running socket server or a window.
+        if let code = InstallCLI.run(arguments) {
+            return code
+        }
         if arguments.contains("--doctor") {
             return doctor()
         }

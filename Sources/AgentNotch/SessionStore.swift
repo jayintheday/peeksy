@@ -31,23 +31,23 @@ final class SessionCountMirror: @unchecked Sendable {
 
 // MARK: - Hook install probe
 
-/// "Is our hook wired into Claude Code?", answered by a substring scan.
+/// "Is our hook wired into Claude Code?"
 ///
-/// Deliberately NOT a parser and deliberately READ-ONLY. `~/.claude/settings.json`
-/// carries other people's hooks; rewriting it is M5's problem and the single
-/// highest-blast-radius operation in this project. A substring is enough to
-/// decide whether to show one line of empty-state text.
+/// Answered by the SAME merge the installer uses: if a fresh install would be a
+/// no-op, we are installed. READ-ONLY — this runs on the reap tick and must
+/// never write.
+///
+/// It replaced a substring scan for `agent-notch-hook.sh`, which said yes to a
+/// half-finished install. Five events of nine, or a `Notification` group that
+/// picked up a matcher, both leave a file that mentions us and a UI that never
+/// moves — and "installed" is exactly the wrong thing to tell somebody in that
+/// state.
 enum HookProbe {
-    static let marker = "agent-notch-hook.sh"
-
-    static var settingsURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/settings.json")
-    }
-
-    static func isInstalled(at url: URL = settingsURL) -> Bool {
-        guard let data = try? Data(contentsOf: url) else { return false }
-        return String(decoding: data, as: UTF8.self).contains(marker)
+    static func isInstalled(
+        settingsURL: URL = SupportPaths.claudeSettings(),
+        command: String = SupportPaths.hookScript().path
+    ) -> Bool {
+        HookInstaller(settingsURL: settingsURL, command: command).isInstalled()
     }
 }
 

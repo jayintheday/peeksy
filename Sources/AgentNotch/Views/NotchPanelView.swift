@@ -18,6 +18,11 @@ enum NotchListMetrics {
     static let rowWithDetailHeight: CGFloat = 47
     static let separatorHeight: CGFloat = 1
     static let emptyStateHeight: CGFloat = 58
+    /// The empty state grows when it has to carry the install affordance — one
+    /// more line of explanation and a button. Two constants rather than one
+    /// generous height, because the extra space is dead the moment the hook IS
+    /// installed and this panel hangs over the user's menu bar all day.
+    static let emptyStateInstallHeight: CGFloat = 92
     static let tccFooterHeight: CGFloat = 78
     static let horizontalPadding: CGFloat = 10
 
@@ -25,12 +30,16 @@ enum NotchListMetrics {
         hasDetail ? rowWithDetailHeight : rowHeight
     }
 
+    static func emptyStateHeight(hookInstalled: Bool) -> CGFloat {
+        hookInstalled ? emptyStateHeight : emptyStateInstallHeight
+    }
+
     /// Height the expanded list WANTS. `NotchGeometryResolver` caps it at 60% of
     /// the screen; anything beyond that scrolls.
-    static func contentHeight(rows: [SliceRow], tccBlocked: Bool) -> CGFloat {
+    static func contentHeight(rows: [SliceRow], tccBlocked: Bool, hookInstalled: Bool) -> CGFloat {
         var height = headerHeight
         if rows.isEmpty {
-            height += emptyStateHeight
+            height += emptyStateHeight(hookInstalled: hookInstalled)
         } else {
             for row in rows { height += rowHeight(hasDetail: row.detail != nil) }
             height += CGFloat(max(0, rows.count - 1)) * separatorHeight
@@ -55,9 +64,13 @@ struct NotchPanelView: View {
     /// panel open across an app activation is a fight with the window server
     /// that we lose.
     let onRowTap: (Session) -> Void
+    /// Opens the approval sheet. The panel collapses first — see
+    /// `NotchController`.
+    let onInstallHook: () -> Void
 
     @State private var now = Date()
     @State private var hovered: String?
+    @State private var installHovered = false
     /// ONE timer for the whole list. Sixty rows with a timer each is sixty
     /// run-loop sources to redraw text that changes once a second.
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -187,14 +200,36 @@ struct NotchPanelView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.7))
             if !store.hookInstalled {
-                Text("Hook not installed — run scripts/install_hook.sh")
+                Text("Claude Code is not reporting to AgentNotch yet.")
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.45))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                installButton
             }
         }
         .padding(.horizontal, NotchListMetrics.horizontalPadding)
-        .frame(height: NotchListMetrics.emptyStateHeight, alignment: .topLeading)
+        .frame(
+            height: NotchListMetrics.emptyStateHeight(hookInstalled: store.hookInstalled),
+            alignment: .topLeading)
+    }
+
+    /// A tap target, not an `NSButton`.
+    ///
+    /// The panel is a `.nonactivatingPanel` behind an interactive mask, and the
+    /// rows in this list already prove that `.onTapGesture` works there. A real
+    /// `Button` would depend on AppKit control tracking inside a window that is
+    /// usually not key, which is a different and less well-tested path.
+    private var installButton: some View {
+        Text("Install the hook…")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.white.opacity(installHovered ? 0.22 : 0.14)))
+            .contentShape(Capsule())
+            .onHover { installHovered = $0 }
+            .onTapGesture { onInstallHook() }
+            .padding(.top, 2)
     }
 
     @ViewBuilder

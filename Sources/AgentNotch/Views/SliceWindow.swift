@@ -17,7 +17,7 @@ final class SliceWindow {
     private static let size = NSSize(width: 420, height: 360)
     private static let margin: CGFloat = 20
 
-    init(store: SessionStore) {
+    init(store: SessionStore, onInstallHook: @escaping () -> Void = {}) {
         panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: Self.size),
             styleMask: [.titled, .closable, .utilityWindow],
@@ -35,7 +35,8 @@ final class SliceWindow {
         // panel alive, so a close would leave `panel` dangling.
         panel.isReleasedWhenClosed = false
 
-        let hosting = NSHostingView(rootView: SliceListView(store: store))
+        let hosting = NSHostingView(
+            rootView: SliceListView(store: store, onInstallHook: onInstallHook))
         // EMPTY sizingOptions, deliberately. NSHostingView defaults to driving
         // the window's size from SwiftUI's ideal size, which made this panel
         // grow to whatever the content wanted (measured: 613 pt) and then get

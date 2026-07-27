@@ -26,6 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// anything", and having no way back to a plain window would make a bad
     /// geometry bug indistinguishable from a dead app.
     private var sliceWindow: SliceWindow?
+    /// Built on first use. An approval sheet for somebody's settings file has no
+    /// business existing before they ask for one.
+    private var installWindow: HookInstallWindow?
     private var signalSources: [DispatchSourceSignal] = []
 
     private let terminalBundleID = "com.apple.Terminal"
@@ -83,20 +86,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         uiLog.info("listening on \(self.socketURL.path, privacy: .public)")
 
         store.startReaping()
+        refreshInstalledHookScript()
 
         switch mode {
         case .notch:
             let notch = NotchController(store: store)
+            notch.onInstallHookRequested = { [weak self] in self?.showInstallSheet() }
             notch.start()
             self.notch = notch
         case .slice:
             uiLog.info("--slice: using the M2 window instead of the notch")
-            let window = SliceWindow(store: store)
+            let window = SliceWindow(store: store) { [weak self] in self?.showInstallSheet() }
             window.show()
             self.sliceWindow = window
         }
 
         installSignalHandlers(server: server)
+    }
+
+    // MARK: - Hook
+
+    /// Keep the installed script in step with this build.
+    ///
+    /// `settings.json` names a stable Application Support path rather than one
+    /// inside the bundle, precisely so a rebuild cannot delete it out from under
+    /// Claude Code. The cost of that stability is that the copy can go stale, so
+    /// it is refreshed here — but ONLY when the hook is already registered.
+    /// Writing a script nobody asked for, into a directory the user has not
+    /// opted into, is not something a launch should do.
+    private func refreshInstalledHookScript() {
+        guard HookProbe.isInstalled() else { return }
+        switch InstallCLI.syncScript(to: SupportPaths.hookScript()) {
+        case let .success(outcome) where outcome != .upToDate:
+            uiLog.info("hook script \(outcome.rawValue, privacy: .public) from the app bundle")
+        case .success:
+            break
+        case let .failure(complaint):
+            uiLog.error("could not refresh the hook script: \(complaint.description, privacy: .public)")
+        }
+    }
+
+    private func showInstallSheet() {
+        let window = installWindow ?? HookInstallWindow()
+        installWindow = window
+        window.show()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

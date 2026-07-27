@@ -114,6 +114,7 @@ func elapsedText(_ interval: TimeInterval) -> String {
 /// The M2 list. Deliberately plain — M3 throws this away.
 struct SliceListView: View {
     let store: SessionStore
+    let onInstallHook: () -> Void
 
     /// ONE timer for the whole list. A per-row timer at 60 rows is 60 run-loop
     /// sources to render text that changes once a second.
@@ -197,10 +198,12 @@ struct SliceListView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No agent sessions.")
             if !store.hookInstalled {
-                Text("Hook not installed — run scripts/install_hook.sh")
+                Text("Claude Code is not reporting to AgentNotch yet.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Button("Install the hook…") { onInstallHook() }
+                    .controlSize(.small)
             }
         }
         .padding(12)

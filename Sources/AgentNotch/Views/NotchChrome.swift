@@ -21,6 +21,7 @@ struct NotchChrome: View {
     let store: SessionStore
     let onPillTap: () -> Void
     let onRowTap: (Session) -> Void
+    let onInstallHook: () -> Void
 
     private var expanded: Bool { phase.isOpen }
 
@@ -109,7 +110,8 @@ struct NotchChrome: View {
                 NotchPanelView(
                     store: store,
                     width: geometry.expandedFrame.width,
-                    onRowTap: onRowTap
+                    onRowTap: onRowTap,
+                    onInstallHook: onInstallHook
                 )
             }
         }
@@ -133,7 +135,8 @@ struct NotchRootView: View {
             phase: model.phase,
             store: store,
             onPillTap: { model.onPillTap() },
-            onRowTap: { model.onRowTap($0) }
+            onRowTap: { model.onRowTap($0) },
+            onInstallHook: { model.onInstallHook() }
         )
     }
 }
