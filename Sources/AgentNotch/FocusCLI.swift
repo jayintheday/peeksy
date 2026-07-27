@@ -428,6 +428,22 @@ enum FocusCLI {
 
         let f = { (v: CGFloat) in String(format: "%.1f", v) }
         print("menu bar:         \(screen.localizedName) (display \(metrics.displayID))")
+
+        // Presence, the signal that decides whether the pill is on screen at all.
+        // Both sources, because the whole point of replacing the status item is
+        // that a disagreement here is visible instead of silent.
+        let barRect = MenuBarScan.menuBarWindow(
+            in: metrics, bandHeight: bandHeight, windows: windows,
+            primaryScreenMaxY: scanner.primaryScreenMaxY)
+        let inset = screen.frame.maxY - screen.visibleFrame.maxY
+        if let barRect {
+            print("  present         yes — window list: x=\(f(barRect.minX)) y=\(f(barRect.minY))"
+                + " \(f(barRect.width))x\(f(barRect.height))")
+        } else {
+            print("  present         NO — no menu bar window in the band")
+        }
+        print("  inset           \(f(inset)) pt (frame.maxY - visibleFrame.maxY)"
+            + ((barRect != nil) == (inset > 1) ? "   agrees" : "   DISAGREES"))
         print("  primaryMaxY     \(f(scanner.primaryScreenMaxY))   bandHeight \(f(bandHeight))"
             + "   statusLayer \(MenuBarScan.defaultStatusLayer)")
         let atLayer = windows.filter { $0.layer == MenuBarScan.defaultStatusLayer }
@@ -560,19 +576,27 @@ enum FocusCLI {
         var failures = 0
         let pointer = NSEvent.mouseLocation
         print(String(format: "  pointer at x%.0f y%.0f", pointer.x, pointer.y))
-        // A status item's window reports a degenerate frame until the run loop
-        // has placed it, so give it a turn before asking. `nil` after that is
-        // the app's ONLY signal for menu-bar-hidden / full-screen / status-item
-        // overflow, and it means `orderOut`; nil on an ordinary desktop would
-        // mean the app hides itself the first time anything re-resolves geometry.
+        // Give the run loop a turn before asking, so the window list has settled.
+        // `nil` after that is the app's ONLY signal for menu-bar-hidden and
+        // another app in full screen, and it means `orderOut`; nil on an ordinary
+        // desktop would mean the app hides itself the first time anything
+        // re-resolves geometry.
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-        if let anchorFrame = controller.debugAnchorFrame {
-            print(String(format: "  anchor    x%.0f y%.0f %.0fx%.0f on %@",
-                         anchorFrame.minX, anchorFrame.minY,
-                         anchorFrame.width, anchorFrame.height,
-                         controller.debugAnchorScreen ?? "?"))
+        if let menuBar = controller.debugMenuBarRect {
+            print(String(format: "  menu bar  x%.0f y%.0f %.0fx%.0f on %@",
+                         menuBar.minX, menuBar.minY,
+                         menuBar.width, menuBar.height,
+                         controller.debugMenuBarScreen ?? "?"))
+            // The independent second opinion. These two disagreeing is the first
+            // thing to look at if the pill hides when it should not, or vice
+            // versa — one reads the window list, the other reads NSScreen.
+            let inset = controller.debugMenuBarInset ?? 0
+            let agrees = inset > 1
+            print(String(format: "  inset     %.1f pt (frame.maxY - visibleFrame.maxY) — %@",
+                         inset, agrees ? "agrees" : "DISAGREES with the window list"))
+            if !agrees { failures += 1 }
         } else {
-            print("  anchor    NIL — the app would order itself out")
+            print("  menu bar  NIL — the app would order itself out")
             failures += 1
         }
         report("start")

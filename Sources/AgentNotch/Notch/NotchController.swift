@@ -41,7 +41,7 @@ final class NotchModel {
 /// | peeking   | collapsed | cursor leaves every zone, after grace|
 /// | pinned    | collapsed | Escape / outside click / resign key / second pill click / row click |
 /// | pinned    | peeking   | NEVER — a pin the pointer could undo would not be a pin |
-/// | any       | collapsed + orderOut | the anchor reports no menu bar |
+/// | any       | collapsed + orderOut | the probe reports no menu bar  |
 /// | any       | collapsed | space change, sleep, lock            |
 @MainActor
 final class NotchController {
@@ -66,7 +66,8 @@ final class NotchController {
     // MARK: Collaborators
 
     private let store: SessionStore
-    private let anchor = PillAnchorItem()
+    private let scanner = MenuBarScanner()
+    private lazy var menuBar = MenuBarProbe(scanner: scanner)
     private let screens = ScreenMetricsReader()
     private let hover = HoverEngine()
     private let dismiss = DismissMonitor()
@@ -189,21 +190,20 @@ final class NotchController {
         system.onDismiss = { [weak self] in
             self?.collapse()
             // A Space change is also how entering and leaving another app's full
-            // screen arrives, and full screen is the commonest reason the anchor
-            // disappears. Re-resolving here is what makes the pill come back the
-            // moment the menu bar does.
+            // screen arrives, and full screen is the commonest reason the menu
+            // bar disappears. Re-resolving here is what makes the pill come back
+            // the moment the menu bar does.
             self?.refreshGeometry()
         }
     }
 
     // MARK: - Geometry
 
-    private func computeGeometry() -> NotchGeometry? {
-        // The anchor's screen is BY DEFINITION the screen with the active menu
-        // bar — not `NSScreen.main` (the screen with the key window, which for an
-        // accessory app is nobody's) and not "the built-in display" (wrong the
-        // moment the lid is shut).
-        guard let screen = anchor.hostScreen ?? NSScreen.main else { return nil }
+    /// `screen` is passed in by `refreshGeometry`, which has just taken a
+    /// reading; resolving it again here would be a second window-list scan per
+    /// refresh for an answer we already have.
+    private func computeGeometry(on screen: NSScreen? = nil) -> NotchGeometry? {
+        guard let screen = screen ?? menuBar.read().screen ?? NSScreen.main else { return nil }
         return NotchGeometryResolver.resolve(
             screen: screens.metrics(for: screen),
             listContentHeight: currentContentHeight(),
@@ -252,8 +252,14 @@ final class NotchController {
     /// lid.
     func refreshGeometry() {
         guard panel != nil, let model else { return }
-        setHidden(anchor.currentFrame == nil)
-        guard let fresh = computeGeometry(), fresh != geometry else { return }
+        // ONE reading, both consumers. `setHidden` and `computeGeometry` used to
+        // ask the anchor separately, which was free; asking the window server
+        // twice per refresh is not.
+        let menuBarReading = menuBar.read()
+        setHidden(!menuBarReading.isPresent)
+        guard let fresh = computeGeometry(on: menuBarReading.screen),
+              fresh != geometry
+        else { return }
 
         let previousLiveFrame = geometry?.frame(for: phase)
         geometry = fresh
@@ -277,9 +283,13 @@ final class NotchController {
         hover.burst()
     }
 
-    /// `orderOut` when the anchor says there is no menu bar: hidden bar, another
-    /// app in full screen, or status-item overflow. All three mean the same
-    /// thing — there is nowhere to hang the pill.
+    /// `orderOut` when there is no menu bar: hidden bar, or another app in full
+    /// screen. Both mean the same thing — there is nowhere to hang the pill.
+    ///
+    /// Status-item OVERFLOW used to arrive here too, because the oracle was a
+    /// status item that overflowed. It no longer does, and should not: a
+    /// shielding-level window cannot overflow, and hiding the product because
+    /// somebody else's icon got dropped is backwards.
     private func setHidden(_ hide: Bool) {
         guard isHidden != hide else { return }
         isHidden = hide
@@ -334,8 +344,8 @@ final class NotchController {
         // one moment it starts to matter.
         refreshGeometry()
         // `isHidden` is re-read AFTER the refresh: that refresh is also where the
-        // anchor gets re-examined, so checking first would let us expand a panel
-        // that the same call had just ordered out.
+        // menu bar gets re-examined, so checking first would let us expand a
+        // panel that the same call had just ordered out.
         guard !isHidden, let g = geometry, let model, let panel else { return }
         // Bumped here so any collapse completion still in flight from a
         // hover-out 300 ms ago is invalidated before it can shrink the window
@@ -416,7 +426,7 @@ final class NotchController {
     }
 
     /// No animation, no settle. For "the world changed underneath us" — the
-    /// anchor vanished, we are about to `orderOut`.
+    /// menu bar vanished, we are about to `orderOut`.
     private func collapseImmediately() {
         guard let g = geometry, let model else { return }
         frameEpoch &+= 1
@@ -605,9 +615,11 @@ final class NotchController {
     var debugPanelFrame: CGRect? { panel?.frame }
     var debugMask: [CGRect] { hosting?.interactiveMask ?? [] }
     /// `nil` here is the app's single "there is no menu bar" signal, so it is
-    /// worth being able to see it without guessing.
-    var debugAnchorFrame: CGRect? { anchor.currentFrame }
-    var debugAnchorScreen: String? { anchor.hostScreen?.localizedName }
+    /// worth being able to see it without guessing. `debugMenuBarInset` is the
+    /// independent second opinion — the two disagreeing is the thing to look at.
+    var debugMenuBarRect: CGRect? { menuBar.read().rect }
+    var debugMenuBarScreen: String? { menuBar.read().screen?.localizedName }
+    var debugMenuBarInset: CGFloat? { menuBar.read().inset }
 
     // MARK: - Rect helpers
 

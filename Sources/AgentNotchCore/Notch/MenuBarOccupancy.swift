@@ -118,6 +118,52 @@ public enum MenuBarScan {
     /// How far a calibration rect may disagree before the sample is distrusted.
     public static let calibrationSlack: CGFloat = 2
 
+    /// `kCGMainMenuWindowLevel` — the layer the menu bar itself is drawn on, one
+    /// below the status items that sit in it.
+    public static let defaultMenuBarLayer = 24
+
+    /// How much of a display's width the menu bar window must span to be the
+    /// menu bar rather than something else that happens to share its layer.
+    public static let menuBarWidthFraction: CGFloat = 0.9
+
+    /// Is there a menu bar on this display right now?
+    ///
+    /// Replaces asking a status item of our own, which cost the user ~17 pt of
+    /// menu bar to answer and — being the leftmost item on a full bar — was the
+    /// first thing macOS dropped, at which point the app hid itself for good.
+    ///
+    /// Returns the menu bar's rect in AppKit global coordinates, or nil.
+    ///
+    /// The band-overlap requirement is what catches an AUTO-HIDDEN menu bar:
+    /// macOS parks that window above the screen's top edge rather than removing
+    /// it, so it is still "on screen" and still full width. Requiring it to
+    /// actually overlap the display's band is the same trick the status-item
+    /// anchor used, without the status item.
+    public static func menuBarWindow(
+        in screen: ScreenMetrics,
+        bandHeight: CGFloat,
+        windows: [StatusWindow],
+        primaryScreenMaxY: CGFloat,
+        menuBarLayer: Int = defaultMenuBarLayer
+    ) -> CGRect? {
+        let f = screen.frame
+        let band = CGRect(
+            x: f.minX,
+            y: f.maxY - bandHeight,
+            width: f.width,
+            height: bandHeight)
+
+        for window in windows where window.layer == menuBarLayer {
+            let rect = appKitRect(fromCGWindowBounds: window.cgBounds,
+                                  primaryScreenMaxY: primaryScreenMaxY)
+            let wideEnough: Bool = rect.width >= f.width * menuBarWidthFraction
+            let onThisDisplay: Bool = rect.midX >= f.minX && rect.midX <= f.maxX
+            let inTheBand: Bool = rect.intersects(band)
+            if wideEnough && onThisDisplay && inTheBand { return rect }
+        }
+        return nil
+    }
+
     /// `kCGWindowBounds` (top-left origin, y DOWN) → AppKit global (bottom-left
     /// origin, y UP).
     ///

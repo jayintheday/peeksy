@@ -245,6 +245,60 @@ struct MenuBarOccupancyTests {
         #expect(result.clearance(rightOf: 950) == -20)
     }
 
+    // MARK: - Presence
+
+    private func menuBarWindow(
+        _ windows: [StatusWindow],
+        screen: ScreenMetrics = ScreenFixture.notched14
+    ) -> CGRect? {
+        MenuBarScan.menuBarWindow(
+            in: screen,
+            bandHeight: 32,
+            windows: windows,
+            primaryScreenMaxY: MenuBarFixture.primaryMaxY)
+    }
+
+    @Test("the menu bar's own window is what says there is a menu bar")
+    func findsTheMenuBarWindow() {
+        // Captured: layer 24, 0,0 1512x33.
+        let rect = menuBarWindow(MenuBarFixture.busy14 + MenuBarFixture.noise)
+        #expect(rect == CGRect(x: 0, y: 949, width: 1512, height: 33))
+    }
+
+    @Test("an auto-hidden menu bar is parked above the screen, not removed")
+    func autoHiddenMenuBarReadsAsAbsent() {
+        // macOS slides that window above the top edge rather than deleting it,
+        // so it is still on screen and still full width. Requiring it to overlap
+        // the band is what catches it — the same trick the old status-item
+        // anchor used, without the status item.
+        let parked = StatusWindow(
+            windowID: 900_001, layer: 24,
+            cgBounds: CGRect(x: 0, y: -40, width: 1512, height: 33))
+        #expect(menuBarWindow([parked]) == nil)
+    }
+
+    @Test("a narrow layer-24 window is not the menu bar")
+    func rejectsANarrowMenuBarLayerWindow() {
+        let notTheBar = StatusWindow(
+            windowID: 900_009, layer: 24,
+            cgBounds: CGRect(x: 400, y: 0, width: 300, height: 33))
+        #expect(menuBarWindow([notTheBar]) == nil)
+    }
+
+    @Test("status items alone do not prove there is a menu bar")
+    func statusItemsAreNotTheMenuBar() {
+        #expect(menuBarWindow(MenuBarFixture.busy14) == nil)
+    }
+
+    @Test("another display's menu bar is not this display's")
+    func rejectsAnotherDisplaysMenuBar() {
+        // A second display to the right, with its own bar.
+        let elsewhere = StatusWindow(
+            windowID: 900_010, layer: 24,
+            cgBounds: CGRect(x: 1512, y: 0, width: 1512, height: 33))
+        #expect(menuBarWindow([elsewhere]) == nil)
+    }
+
     @Test("the overflowing bar reaches back past where the pill sits")
     func overflowingBarOverlapsThePill() {
         let result = occupancy(MenuBarFixture.overflowing)
