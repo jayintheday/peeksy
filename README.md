@@ -1,38 +1,35 @@
 # Peeksy
 
-**See which agent session is waiting on you, without going to look.**
+**Mission control for your AI agents.**
 
-Peeksy is a background macOS app that puts a small pill beside your
-MacBook's notch. The pill's colour is the most urgent thing happening across
-every Claude Code session you have running. Hover to peek at the list, click to
-pin it, click a row to jump straight to that session's terminal tab.
+Peeksy is a background macOS app that sits a small pill next to your MacBook's
+notch. The colour is the most urgent thing happening across every Claude Code
+session you have running. Hover to see the list, click a row to jump straight
+into that session.
 
 <img src="assets/screenshot.png" alt="Peeksy expanded beside the notch, showing one working session" width="100%">
 
-The problem it solves: you start three agents in three terminal tabs, go and do
-something else, and then have no idea which one finished, which one is still
-thinking, and which one has been sitting on a permission prompt for ten minutes.
-The menu bar is the only surface you are already looking at.
-
----
+When you run several agents at once, it is easy to lose track of which one
+finished, which is still thinking, and which has been waiting on a permission.
+Peeksy keeps that visible without another window to watch.
 
 ## Requirements
 
 - macOS 14 or later
 - [Claude Code](https://claude.com/claude-code)
-- A Swift toolchain (Xcode or the Command Line Tools) — you build it yourself,
-  see [Installing](#installing)
+- A Swift toolchain (Xcode or the Command Line Tools). You build it yourself;
+  see [Installing](#installing).
 
-Designed for Macs with a notch. There is a fallback path for displays without
-one — the pill sits at the right of an ordinary 26pt menu-bar band — but it is
-**untested**, as is multi-display. See [Known gaps](#known-gaps).
+Designed for Macs with a notch. There is a fallback for displays without one
+(the pill sits at the right of an ordinary menu-bar band), but that path is
+untested, as is multi-display. See [Known gaps](#known-gaps).
 
 ## Installing
 
-There are no prebuilt downloads yet, deliberately: distributing an ad-hoc
-signed app means every user meets a Gatekeeper wall, and the ad-hoc signature
-changes on every build, which silently revokes the app's Automation permission
-on every update. Building it yourself avoids both. See [Signing](#signing).
+There are no prebuilt downloads yet. An ad-hoc signed app hits Gatekeeper when
+downloaded, and the signature changes on every build, which silently revokes
+Automation permission on every update. Building it yourself avoids both. See
+[Signing](#signing).
 
 ```sh
 git clone https://github.com/jayintheday/peeksy.git
@@ -41,59 +38,58 @@ cd peeksy
 open ~/Applications/Peeksy.app
 ```
 
-The pill should appear beside the notch. Then, **two things to do once**:
+The pill should appear next to the notch. Then do these two things once:
 
-1. **Register the hook.** Hover the pill to open the panel and click
-   *Install the hook…*. You will get a unified diff of the exact change before
-   anything is written. Or from the command line:
+1. **Register the hook.** Hover the pill and click *Install the hook…*. You
+   get a unified diff of the exact change before anything is written. Or from
+   the command line:
 
    ```sh
    scripts/install_hook.sh              # preview, then ask before writing
    ```
 
-2. **Grant Automation.** Click any session row. macOS will ask for permission to
-   control Terminal — that is what raises the right tab. Nothing else is ever
+2. **Grant Automation.** Click any session row. macOS will ask for permission
+   to control Terminal. That is what raises the right tab. Nothing else is
    requested.
 
 New sessions appear as soon as Claude Code fires its next hook event. Sessions
 already running when you launched are found by a `ps`/`lsof` scan and shown as
-`waiting…` until a hook event tells us what they are actually doing.
+`waiting…` until a hook event confirms what they are doing.
 
 ### Launch at login, and quitting
 
-The app has no Dock icon and no menu bar menu, so both controls live on the
-**gear icon at the right of the panel header**:
+Peeksy has no Dock icon and no menu-bar menu. Both controls live on the gear
+icon at the right of the panel header:
 
-- **Launch at login** — off by default. Turn it on and macOS starts Peeksy
-  for you; it will also appear in System Settings → General → Login Items, and
-  turning it off there wins.
-- **Quit** — stops the app. The socket is unlinked on the way out, so the hook
-  drops back to its zero-fork fast path and Claude Code behaves exactly as if
-  Peeksy had never been installed.
+- **Launch at login** is off by default. Turn it on and macOS starts Peeksy for
+  you. It also appears in System Settings → General → Login Items; turning it
+  off there wins.
+- **Quit** stops the app. The socket is unlinked on the way out, so the hook
+  drops back to its fast path and Claude Code behaves as if Peeksy had never
+  been installed.
 
-To start it again: `open ~/Applications/Peeksy.app`, or turn on launch at
-login and it handles itself.
+To start again: `open ~/Applications/Peeksy.app`, or turn on launch at login.
 
-## What it reads, and what it never does
+## Privacy
 
-Everything is local. There is no network code in this app and no telemetry.
+Everything is local. There is no network code and no telemetry.
 
 | It reads | Why |
 |---|---|
-| Claude Code hook payloads | over a **Unix domain socket** (`0600`, in a `0700` directory) — not a TCP port |
+| Claude Code hook payloads | over a Unix domain socket (`0600`, in a `0700` directory), not a TCP port |
 | `~/.claude/projects/…/*.jsonl` | just enough of the tail to read the session's own task title |
 | `ps` / `lsof` | to find sessions that were already running at launch |
 | Terminal, via AppleScript | only to raise the tab you clicked |
 
-It writes to exactly two places: its own folder in `~/Library/Application
-Support/Peeksy`, and — only when you approve the diff — an **appended** hooks
-block in `~/.claude/settings.json`. That file routinely carries other tools'
-hooks, so the installer is append-only, backed up, atomic, and preview-gated. It
-never rewrites what it did not add.
+It writes to exactly two places: its own folder in
+`~/Library/Application Support/Peeksy`, and (only when you approve the diff) an
+appended hooks block in `~/.claude/settings.json`. That file often carries
+other tools' hooks, so the installer is append-only, backed up, atomic, and
+preview-gated. It never rewrites what it did not add.
 
-**The hook fails open, by contract.** It always exits 0, never prints to stdout,
-and its first line is a check for the socket — so when Peeksy is not running
-it costs zero forks and Claude Code cannot tell it exists.
+**The hook fails open.** It always exits 0, never prints to stdout, and its
+first line checks for the socket. When Peeksy is not running it costs zero
+forks, and Claude Code cannot tell it exists.
 
 ## Session states
 
@@ -101,21 +97,19 @@ it costs zero forks and Claude Code cannot tell it exists.
 |---|---|---|
 | **needs attention** | red | a permission prompt or an idle prompt is waiting on you |
 | **stale** | orange | was working, then went quiet for 10 minutes |
-| **working** | green | mid-turn — running a tool, or thinking |
+| **working** | green | mid-turn: running a tool, or thinking |
 | **done** | cyan | the turn finished |
 | **idle** | grey | started, nothing yet |
 | *unknown* | dim grey | found by the launch scan; no hook has confirmed it |
 
-The pill shows **one** colour for possibly many sessions: the most urgent one
-present. `stale` deliberately outranks `working` — a session quiet for ten
-minutes is likelier to want you than one genuinely mid-turn. When anything needs
-attention the whole pill gets a red outline, because a 6pt dot next to a
-physical notch is easy to miss.
+The pill shows one colour for possibly many sessions: the most urgent one
+present. `stale` outranks `working`, because a session quiet for ten minutes is
+likelier to want you than one mid-turn. When anything needs attention the whole
+pill gets a red outline, so a small dot next to the notch is harder to miss.
 
-**Almost nothing moves.** The pill's dot breathes only while something is
-genuinely working, and a row's orb spins under the same rule — and both stop
-when the panel is off screen or Reduce Motion is on. A menu bar app that
-animates all day to tell you nothing has changed is a menu bar app people quit.
+Almost nothing moves. The pill's dot breathes only while something is genuinely
+working, and a row's orb spins under the same rule. Both stop when the panel is
+off screen or Reduce Motion is on.
 
 ## Troubleshooting
 
@@ -123,29 +117,28 @@ animates all day to tell you nothing has changed is a menu bar app people quit.
 scripts/doctor.sh          # sessions, socket, hook registration, TCC state
 ```
 
-**Clicking a row does nothing.** Automation permission. This is the one that
-bites after a rebuild: an ad-hoc signature changes on every build, so macOS
-silently denies Apple events with `-1743` and shows no prompt at all.
+**Clicking a row does nothing.** Automation permission. This bites after a
+rebuild: an ad-hoc signature changes on every build, so macOS silently denies
+Apple events with `-1743` and shows no prompt.
 
 ```sh
 tccutil reset AppleEvents com.vijaypatel.peeksy
 ```
 
-then click a row once to get a fresh prompt.
+Then click a row once to get a fresh prompt.
 
 **No sessions ever appear.** Check the hook is registered and the app is
-running — `scripts/doctor.sh` answers both. The hook is intentionally silent on
-every failure, so it will never tell you itself.
+running. `scripts/doctor.sh` answers both. The hook is silent on every failure,
+so it will never tell you itself.
 
-**You would rather edit `settings.json` by hand.** `Peeksy
---print-hook-json` prints just Peeksy's block — merge its nine entries into
-your `hooks` object. It never reads your settings file, so it also works when
-that file is missing or has been broken by a half-finished edit, and it is safe
-to paste into a bug report.
+**You would rather edit `settings.json` by hand.**
+`Peeksy --print-hook-json` prints just Peeksy's block. Merge its nine entries
+into your `hooks` object. It never reads your settings file, so it still works
+when that file is missing or half-broken, and it is safe to paste into a bug
+report.
 
-**You want to see what an install would change.** That is the other question,
-and it has its own answer: `scripts/install_hook.sh --dry-run` shows a unified
-diff against your real file.
+**You want to see what an install would change.**
+`scripts/install_hook.sh --dry-run` shows a unified diff against your real file.
 
 ## Uninstalling
 
@@ -180,8 +173,8 @@ The codebase is split hard at AppKit:
 
 Tests only depend on Core, which is why logic that could be wrong lives there.
 Adding a second agent runtime is an `AgentAdapter` conformance and an
-`AgentSource` case — proven by a mock adapter in the test suite that speaks a
-completely different wire format and needed 25 lines.
+`AgentSource` case. A mock adapter in the test suite speaks a completely
+different wire format in 25 lines.
 
 ```sh
 swift build && swift test      # 508 tests, 50 suites
@@ -189,7 +182,7 @@ swift build && swift test      # 508 tests, 50 suites
 
 The app icon is generated, not committed: `assets/AppIcon.png` is the 1024×1024
 source and `build_app.sh` turns it into `AppIcon.icns` whenever it is newer. To
-use your own, replace the PNG — it must be 1024×1024 and already the rounded-rect
+use your own, replace the PNG. It must be 1024×1024 and already the rounded-rect
 shape with transparent corners, because macOS does not mask an `.icns`.
 
 Useful flags on the built binary:
@@ -212,11 +205,11 @@ Honest ones, all reproducible:
   stopped using a status item as its anchor.
 - **Cursor and VS Code are not user-confirmed.** Zed's integrated terminal is.
   Zed's agent panel is not.
-- **Claude Desktop cannot be supported** — its agent runs with a per-conversation
+- **Claude Desktop cannot be supported.** Its agent runs with a per-conversation
   config root that has no `settings.json`, so no hook can ever fire.
 - `CGWindowList` reports the panel at ~0.903 scale for the first 10–30 seconds
   after launch and then corrects itself. Pre-existing, not caused by any current
-  code; it only matters because window metadata is this repo's substitute for a
+  code. It only matters because window metadata is this repo's substitute for a
   screenshot.
 
 ## Signing
@@ -226,13 +219,13 @@ you made on your own machine, and wrong for anything you download:
 
 - Gatekeeper blocks an ad-hoc signed app that arrives from the internet.
 - The signature's `cdhash` changes on **every build**, and TCC keys Automation
-  permission to the `cdhash` — so a distributed update would silently break
+  permission to the `cdhash`, so a distributed update would silently break
   click-to-focus with no prompt and no error.
 
 Proper Developer ID signing plus notarisation would fix both. It is not done
-because it costs $99/year and nobody has asked yet. The Mac App Store is
-permanently out of reach for this app regardless — AppleScript-driven terminal
-focus and process scanning are disqualifying.
+yet because it costs $99/year and nobody has asked. The Mac App Store is out of
+reach for this app either way: AppleScript-driven terminal focus and process
+scanning are disqualifying.
 
 ## Contributing
 
@@ -246,7 +239,7 @@ Issues and PRs welcome. Two things to know:
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 This project ports and adapts code from two others, both MIT, both credited
 file-by-file in [NOTICE](NOTICE):
