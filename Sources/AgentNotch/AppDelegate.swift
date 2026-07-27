@@ -87,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         store.startReaping()
         refreshInstalledHookScript()
+        bootstrapRunningSessions(into: store)
 
         switch mode {
         case .notch:
@@ -102,6 +103,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         installSignalHandlers(server: server)
+    }
+
+    // MARK: - Cold start
+
+    /// Ask the system what was already running, off the main thread.
+    ///
+    /// Deliberately AFTER `server.start()`. The scan takes tens of milliseconds
+    /// and hook events are the better source for anything it would find, so the
+    /// ingest path must be open first — `SessionRegistry.seed` then skips every
+    /// pid and tty a hook has already claimed.
+    private func bootstrapRunningSessions(into store: SessionStore) {
+        let scanner = ProcessScanner()
+        ioQueue.async {
+            let found = scanner.scan()
+            guard !found.isEmpty else { return }
+            Task { @MainActor in store.bootstrap(found) }
+        }
     }
 
     // MARK: - Hook

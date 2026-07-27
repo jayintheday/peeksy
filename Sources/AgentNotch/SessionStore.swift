@@ -152,6 +152,21 @@ final class SessionStore {
         }
     }
 
+    // MARK: - Cold start
+
+    /// Fold a launch-time process scan in.
+    ///
+    /// Called once, from `AppDelegate`, AFTER the socket is listening — so a
+    /// hook event that beats the scan wins on the merits: `seed` skips any pid
+    /// or tty already tracked, and the rows it does create are `.bootstrap`,
+    /// which the list renders as "waiting…" rather than inventing a state.
+    func bootstrap(_ found: [DiscoveredProcess]) {
+        let created = registry.seed(found, source: .claudeCode, now: Date())
+        guard !created.isEmpty else { return }
+        uiLog.info("cold start: adopted \(created.count, privacy: .public) running session(s)")
+        publish()
+    }
+
     // MARK: - Housekeeping
 
     /// The app's only model-side timer. Started by `AppDelegate` once the server

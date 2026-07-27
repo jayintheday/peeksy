@@ -123,15 +123,19 @@ enum FocusCLI {
         print("Terminal.app:     \(terminalRunning ? "running" : "not running")")
         print("")
 
-        // 3. Live agent sessions, as the hook would see them.
-        let sessions = claudeProcesses()
+        // 3. Live agent sessions, exactly as the cold-start scan sees them.
+        //    This used to match "claude" anywhere in `args` and listed seventeen
+        //    Claude.app helper processes; `ProcessScan` is the same filter the
+        //    app actually seeds from, so the two can never disagree.
+        let sessions = ProcessScanner().scan()
         if sessions.isEmpty {
-            print("claude processes: none found")
+            print("claude processes: none with a terminal")
         } else {
             print("claude processes:")
             for session in sessions {
-                let tty = normalizeTty(session.tty) ?? "(no tty)"
-                print("  pid \(session.pid)  tty \(tty)")
+                let tty = session.tty ?? "(no tty)"
+                let cwd = session.cwd ?? "(cwd unknown)"
+                print("  pid \(session.pid)  tty \(tty)  \(cwd)")
             }
         }
         print("")
@@ -408,52 +412,6 @@ enum FocusCLI {
         let type = attributes[.type] as? FileAttributeType
         if type == .typeSocket { return "yes (socket)" }
         return "PATH EXISTS BUT IS NOT A SOCKET (\(type?.rawValue ?? "unknown"))"
-    }
-
-    private struct AgentProcess {
-        let pid: String
-        let tty: String
-    }
-
-    /// `ps -Ao pid=,tty=,args=` — a doctor-grade heuristic, not a registry.
-    private static func claudeProcesses() -> [AgentProcess] {
-        guard let output = shellPS() else { return [] }
-        var found: [AgentProcess] = []
-        for line in output.split(separator: "\n") {
-            let fields = line.split(separator: " ", omittingEmptySubsequences: true)
-            guard fields.count >= 3 else { continue }
-            let pid = String(fields[0])
-            let tty = String(fields[1])
-            let command = fields.dropFirst(2).joined(separator: " ")
-            guard isClaudeCommand(command) else { continue }
-            found.append(AgentProcess(pid: pid, tty: tty))
-        }
-        return found
-    }
-
-    private static func isClaudeCommand(_ command: String) -> Bool {
-        let lowered = command.lowercased()
-        guard lowered.contains("claude") else { return false }
-        // Don't report ourselves, the doctor invocation, or the hook.
-        if lowered.contains("agentnotch") || lowered.contains("agent-notch") { return false }
-        return true
-    }
-
-    private static func shellPS() -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-Ao", "pid=,tty=,args="]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
     }
 
     private static func printErr(_ message: String) {

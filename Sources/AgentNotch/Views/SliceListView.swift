@@ -20,6 +20,9 @@ struct SliceRow: Identifiable, Equatable {
     /// False for the Claude.app case — the row still works, it just raises an
     /// app rather than a terminal tab.
     let hasTerminal: Bool
+    /// The symbol's colour. Named on the row rather than derived inside a `body`
+    /// so the two lists cannot drift apart on what "stalled" looks like.
+    let tint: RowTint
 
     /// Build the visible rows from a registry snapshot.
     ///
@@ -54,7 +57,8 @@ struct SliceRow: Identifiable, Equatable {
                 stateText: stateText(for: session),
                 symbol: symbol(for: session),
                 detail: session.pendingPermission?.summary ?? session.lastToolSummary,
-                hasTerminal: hasTerminal
+                hasTerminal: hasTerminal,
+                tint: tint(for: session)
             )
         }
     }
@@ -84,7 +88,21 @@ struct SliceRow: Identifiable, Equatable {
         }
     }
 
-    /// Plain SF Symbols. No colour, no pulsing, no `TimelineView` — that is M4.
+    /// Colour carries state; motion does not. The pill's dot is the only thing
+    /// in this app that moves, and only while something is actually working.
+    private static func tint(for session: Session) -> RowTint {
+        // Provenance beats state here too: a guess is grey, never green.
+        if session.origin == .bootstrap { return .unknown }
+        switch session.state {
+        case .idle: return .idle
+        case .working: return .working
+        case .needsAttention: return .attention
+        case .done: return .done
+        case .stale: return .stale
+        }
+    }
+
+    /// Plain SF Symbols; the colour comes from `tint`.
     private static func symbol(for session: Session) -> String {
         if session.origin == .bootstrap { return "questionmark.circle" }
         switch session.state {
@@ -163,6 +181,7 @@ struct SliceListView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Image(systemName: row.symbol)
+                    .foregroundStyle(row.tint.colour)
                     .frame(width: 14)
                 Text(row.label)
                     .lineLimit(1)

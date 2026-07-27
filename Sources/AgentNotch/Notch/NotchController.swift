@@ -16,6 +16,9 @@ import SwiftUI
 final class NotchModel {
     var geometry: NotchGeometry
     var phase: NotchPhase = .collapsed
+    /// False while the panel is ordered out. The pill's only animation is gated
+    /// on this — see `PillView.breathing`.
+    var isVisible = true
 
     @ObservationIgnored var onPillTap: () -> Void = {}
     @ObservationIgnored var onRowTap: (Session) -> Void = { _ in }
@@ -251,6 +254,9 @@ final class NotchController {
     private func setHidden(_ hide: Bool) {
         guard isHidden != hide else { return }
         isHidden = hide
+        // Before the orderOut, so the animation is torn down while the layer
+        // still exists rather than being left attached to a hidden window.
+        model?.isVisible = !hide
         if hide {
             collapseImmediately()
             panel?.orderOut(nil)

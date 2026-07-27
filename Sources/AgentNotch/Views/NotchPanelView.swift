@@ -160,6 +160,7 @@ struct NotchPanelView: View {
             HStack(spacing: 6) {
                 Image(systemName: row.symbol)
                     .font(.system(size: 11))
+                    .foregroundStyle(row.tint.notchColour)
                     .frame(width: 14)
                 Text(row.label)
                     .font(.system(size: 12))

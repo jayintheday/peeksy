@@ -18,6 +18,7 @@ import SwiftUI
 struct NotchChrome: View {
     let geometry: NotchGeometry
     let phase: NotchPhase
+    let isVisible: Bool
     let store: SessionStore
     let onPillTap: () -> Void
     let onRowTap: (Session) -> Void
@@ -90,7 +91,8 @@ struct NotchChrome: View {
             PillView(
                 aggregate: store.aggregate,
                 slotWidth: pillFrame.width,
-                bandHeight: geometry.bandHeight
+                bandHeight: geometry.bandHeight,
+                isVisible: isVisible
             )
             .offset(x: pillFrame.minX, y: pillFrame.minY)
             .onTapGesture { onPillTap() }
@@ -133,6 +135,7 @@ struct NotchRootView: View {
         NotchChrome(
             geometry: model.geometry,
             phase: model.phase,
+            isVisible: model.isVisible,
             store: store,
             onPillTap: { model.onPillTap() },
             onRowTap: { model.onRowTap($0) },

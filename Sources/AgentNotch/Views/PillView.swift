@@ -1,14 +1,12 @@
 import AgentNotchCore
+import AppKit
 import SwiftUI
 
 /// The collapsed indicator: `[dot] 3`, sitting immediately to the right of the
 /// hardware notch and painted on the same continuous black shape, so it reads as
 /// part of the bezel rather than as a floating widget.
 ///
-/// No `TimelineView`, no pulsing, no breathing. That is M4, and when it arrives
-/// it must be gated on `status == .working` AND on visibility — an unconditional
-/// `TimelineView` in a menu-bar app burns CPU twenty-four hours a day to animate
-/// something nobody is looking at.
+/// The dot breathes while something is working — and ONLY then. See `breathing`.
 struct PillView: View {
     let aggregate: Aggregate
     /// The pill's layout SLOT, from `NotchGeometry.pillRect`. The capsule is
@@ -16,25 +14,69 @@ struct PillView: View {
     /// without the black shape growing to match.
     let slotWidth: CGFloat
     let bandHeight: CGFloat
+    /// False when the panel is ordered out — no menu bar, because another app is
+    /// full screen, the bar is hidden, or the status item overflowed. An
+    /// animation nobody can see is pure battery.
+    let isVisible: Bool
 
     private static let capsuleWidth: CGFloat = 44
     private static let capsuleHeight: CGFloat = 22
     private static let dotSize: CGFloat = 6
 
+    @State private var breathIn = false
+
     private var needsAttention: Bool { aggregate.attentionCount > 0 }
+    private var tint: RowTint { RowTint.forAggregate(aggregate) }
+
+    // MARK: - Motion
+
+    /// THE THREE GATES. All of them, every time.
+    ///
+    ///  1. something is actually `.working` — a settled list must be still;
+    ///  2. the pill is on screen;
+    ///  3. Reduce Motion is off.
+    ///
+    /// Note what this is NOT: there is no `TimelineView` anywhere in this app.
+    /// `TimelineView(.periodic)` installs a run-loop source that fires whether
+    /// or not anything changed, and this window exists twenty-four hours a day.
+    /// A `repeatForever` animation is handed to Core Animation, runs off the
+    /// main thread, and stops dead the moment the gate below closes.
+    private var breathing: Bool {
+        isVisible && aggregate.top == .working && !reduceMotion
+    }
+
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private static let breath = Animation.easeInOut(duration: 1.1).repeatForever(autoreverses: true)
 
     var body: some View {
         capsule
             .frame(width: slotWidth, height: bandHeight)
             // The whole slot is the target, not just the drawn capsule.
             .contentShape(Rectangle())
+            .onAppear { syncBreathing() }
+            .onChange(of: breathing) { syncBreathing() }
+    }
+
+    /// Start and stop explicitly rather than letting a modifier decide.
+    ///
+    /// `.animation(_, value:)` would leave the `repeatForever` attached and
+    /// merely stop retriggering it. Setting the value inside an explicit
+    /// `withAnimation`, and setting it back inside a finite one, is what
+    /// actually tears the repeat down.
+    private func syncBreathing() {
+        if breathing {
+            withAnimation(Self.breath) { breathIn = true }
+        } else {
+            withAnimation(.easeOut(duration: 0.18)) { breathIn = false }
+        }
     }
 
     private var capsule: some View {
         HStack(spacing: 4) {
-            Circle()
-                .fill(dotColour)
-                .frame(width: Self.dotSize, height: Self.dotSize)
+            dot
             if aggregate.count > 0 {
                 Text("\(aggregate.count)")
                     // SF Rounded reads as system chrome next to the menu bar.
@@ -62,17 +104,23 @@ struct PillView: View {
         .animation(.default, value: aggregate.count)
     }
 
-    /// Static colours. M2's treatment, held deliberately: state is carried by
-    /// hue, never by motion, until M4 says otherwise.
-    private var dotColour: Color {
-        if needsAttention { return .red }
-        switch aggregate.top {
-        case .needsAttention: return .red
-        case .working: return .green
-        case .stale: return .yellow
-        case .done: return .cyan
-        case .idle: return Color.white.opacity(0.55)
-        case nil: return Color.white.opacity(0.28)
-        }
+    /// The dot breathes in OPACITY and scale, never in position.
+    ///
+    /// A dot that moves next to a fixed hardware notch reads as the notch itself
+    /// shifting, which is the one illusion this whole design exists to avoid.
+    private var dot: some View {
+        Circle()
+            .fill(tint.notchColour)
+            .frame(width: Self.dotSize, height: Self.dotSize)
+            .scaleEffect(breathIn ? 1.30 : 1.0)
+            .opacity(breathIn ? 0.55 : 1.0)
+            // A halo, so "working" survives being a 6 pt dot on black. Part of
+            // the same animation, not a second one.
+            .background(
+                Circle()
+                    .fill(tint.notchColour.opacity(breathIn ? 0.20 : 0.0))
+                    .frame(width: Self.dotSize * 2.6, height: Self.dotSize * 2.6)
+            )
+            .animation(.easeInOut(duration: 0.25), value: tint)
     }
 }

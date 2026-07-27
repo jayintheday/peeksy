@@ -387,14 +387,28 @@ struct SettingsMergeLiveTests {
         }
     }
 
-    @Test("the real file round-trips through install and uninstall")
+    @Test("the real file round-trips, whether or not the hook is already in it")
     func realFileRoundTrips() throws {
         guard let before = try realSettings() else { return }
         let command = SupportPaths.hookScript().path
 
-        let installed = try SettingsMerge.install(into: before, command: command)
-        let removed = try SettingsMerge.uninstall(from: installed.merged, command: command)
-        #expect(canonical(removed.merged) == canonical(before))
+        // Stated as the two laws rather than as "install then uninstall gives
+        // you back what you started with" — that only holds while the hook is
+        // NOT installed, and the moment it is, the assertion inverts. These hold
+        // from either starting state, which is the property that matters.
+        let clean = try SettingsMerge.uninstall(from: before, command: command).merged
+        let installed = try SettingsMerge.install(into: before, command: command).merged
+
+        #expect(canonical(try SettingsMerge.uninstall(from: installed, command: command).merged)
+                == canonical(clean))
+        #expect(canonical(try SettingsMerge.install(into: clean, command: command).merged)
+                == canonical(installed))
+
+        // And the foreign half is untouched by either direction.
+        for key in before.keys where key != HookSpec.hooksKey {
+            #expect(canonical(clean[key]) == canonical(before[key]))
+            #expect(canonical(installed[key]) == canonical(before[key]))
+        }
     }
 
     @Test("the real file serializes and re-parses without losing anything")
