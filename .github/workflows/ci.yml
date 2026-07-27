@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build & test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Build
+        run: swift build -v
+
+      # The whole suite is AgentNotchCore — Foundation only, no AppKit, no
+      # window server — so it runs headless on a CI box exactly as it does
+      # locally. Anything that needs a screen lives behind the AppKit split
+      # line and is verified by hand; see LEARNINGS.md.
+      - name: Test
+        run: swift test
+
+      # Proves the shippable artefact assembles and signs, which `swift build`
+      # alone does not: the Info.plist, the bundled hook script and the
+      # ad-hoc signature are all build_app.sh's work.
+      - name: Assemble the app bundle
+        run: ./scripts/build_app.sh
+
+      - name: Verify the signature
+        run: codesign --verify --verbose=2 dist/AgentNotch.app
+
+      - name: Check the hook script shipped inside the bundle
+        run: test -x dist/AgentNotch.app/Contents/Resources/agent-notch-hook.sh
+
+  shellcheck:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck scripts/*.sh hooks/agent-notch-hook.sh

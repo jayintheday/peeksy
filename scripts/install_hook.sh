@@ -50,5 +50,8 @@ done
 
 echo "using: $APP"
 echo ""
-# shellcheck disable=SC2086 — MODE is deliberately unquoted so empty means absent
+# MODE is deliberately unquoted: empty must mean "absent", not an empty argument.
+# (The explanation goes on its own line — shellcheck rejects prose appended to a
+# disable directive and then silently ignores the whole directive.)
+# shellcheck disable=SC2086
 exec "$APP/Contents/MacOS/AgentNotch" $MODE "$@"
