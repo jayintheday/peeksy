@@ -46,6 +46,13 @@ struct NotchChrome: View {
         NotchGeometryResolver.swiftUIRect(geometry.pillRect, in: geometry.collapsedFrame)
     }
 
+    /// The capsule's own width, which is narrower than the slot only if someone
+    /// sets `NotchLayout.pillPadding`. Read from the geometry rather than
+    /// recomputed, so the drawn width and the reserved width are the same number.
+    private var pillContentFrame: CGRect {
+        NotchGeometryResolver.swiftUIRect(geometry.pillContentRect, in: geometry.collapsedFrame)
+    }
+
     private var radii: RectangleCornerRadii {
         let r = min(12, geometry.bandHeight / 2)
         return RectangleCornerRadii(
@@ -94,6 +101,7 @@ struct NotchChrome: View {
             PillView(
                 aggregate: store.aggregate,
                 slotWidth: pillFrame.width,
+                contentWidth: pillContentFrame.width,
                 bandHeight: geometry.bandHeight,
                 isVisible: isVisible
             )

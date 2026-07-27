@@ -94,13 +94,107 @@ struct NotchGeometryTests {
     func invariantHoldsEverywhere() {
         for screen in ScreenFixture.all {
             for content in [CGFloat(0), 40, threeRows, 4000] {
-                let g = NotchGeometryResolver.resolve(screen: screen, listContentHeight: content)
-                let report = NotchGeometryResolver.check(g)
-                #expect(
-                    report.isSatisfied,
-                    "display \(screen.displayID) content \(content): \(report.violations)")
+                // Both pill widths: the collapsed frame is content-driven now, so
+                // an invariant that only held for one of them would hold for
+                // roughly half the day.
+                for sessions in [0, 3] {
+                    let g = NotchGeometryResolver.resolve(
+                        screen: screen,
+                        listContentHeight: content,
+                        pillContentWidth: PillMetrics.contentWidth(sessionCount: sessions))
+                    let report = NotchGeometryResolver.check(g)
+                    #expect(
+                        report.isSatisfied,
+                        "display \(screen.displayID) content \(content) sessions \(sessions): \(report.violations)")
+                }
             }
         }
+    }
+
+    // MARK: - Menu bar footprint
+
+    @Test("the pill's width is two-valued, so it cannot jitter as the count changes")
+    func pillMetricsAreTwoValued() {
+        #expect(PillMetrics.contentWidth(sessionCount: 0) == PillMetrics.capsuleHeight)
+        for n in [1, 2, 9, 10, 99, 999] {
+            #expect(PillMetrics.contentWidth(sessionCount: n) == PillMetrics.countedWidth)
+        }
+    }
+
+    @Test("with no sessions the collapsed window gives the menu bar its pixels back")
+    func collapsedShrinksWhenThereAreNoSessions() {
+        let idle = resolveNotched14(sessions: 0)
+        let busy = resolveNotched14(sessions: 3)
+        // Exactly the difference between the drawn capsule and the drawn dot —
+        // no slot padding hiding in between.
+        #expect(busy.collapsedFrame.maxX - idle.collapsedFrame.maxX
+            == PillMetrics.countedWidth - PillMetrics.capsuleHeight)
+        #expect(idle.collapsedFrame.width < busy.collapsedFrame.width)
+        #expect(NotchGeometryResolver.check(idle).isSatisfied)
+        #expect(NotchGeometryResolver.check(busy).isSatisfied)
+    }
+
+    @Test("the drawn pill does not move sideways when the count changes")
+    func theDrawnPillDoesNotMoveWhenTheCountChanges() {
+        let idle = resolveNotched14(sessions: 0)
+        let busy = resolveNotched14(sessions: 3)
+        // It grows to the RIGHT, away from the notch. A capsule that slid
+        // sideways as sessions came and went would read as the notch shifting,
+        // which is the one illusion this design exists to avoid.
+        #expect(idle.pillRect.minX == busy.pillRect.minX)
+        #expect(idle.pillRect.minX == idle.notchRect.maxX + NotchLayout.default.pillGap)
+    }
+
+    @Test("leading hover slop is free — it never reaches left of the notch")
+    func leadingHoverSlopIsFree() {
+        for screen in [ScreenFixture.notched14, ScreenFixture.notched16] {
+            for sessions in [0, 3] {
+                let g = NotchGeometryResolver.resolve(
+                    screen: screen,
+                    listContentHeight: threeRows,
+                    pillContentWidth: PillMetrics.contentWidth(sessionCount: sessions))
+                // Absorbed by notch pixels the window already owns, so the hover
+                // target is wider than the capsule at zero cost to anyone else.
+                #expect(g.pillHotRect.minX == g.notchRect.maxX)
+            }
+        }
+    }
+
+    @Test("the collapsed window wastes nothing to the right of the drawn pill")
+    func theCollapsedWindowWastesNothingTrailing() {
+        for screen in ScreenFixture.all {
+            for sessions in [0, 3] {
+                let g = NotchGeometryResolver.resolve(
+                    screen: screen,
+                    listContentHeight: threeRows,
+                    pillContentWidth: PillMetrics.contentWidth(sessionCount: sessions))
+                let waste = g.collapsedFrame.maxX - g.pillContentRect.maxX
+                #expect(
+                    waste <= NotchGeometryResolver.maxTrailingWaste,
+                    "display \(screen.displayID) sessions \(sessions) wastes \(waste) pt")
+            }
+        }
+    }
+
+    @Test("a padded slot is reported when it starts costing menu bar")
+    func invariantCatchesAFatSlot() {
+        // Somebody restores the old 52 pt slot as `pillPadding` "to make the pill
+        // easier to hit". That is 8 pt of somebody else's status icon painted
+        // black on the trailing side, so it must not pass quietly.
+        let g = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14,
+            listContentHeight: threeRows,
+            layout: NotchLayout(pillPadding: 12))
+        let report = NotchGeometryResolver.check(g)
+        #expect(!report.isSatisfied)
+        #expect(report.violations.contains { $0.contains("right of the drawn pill") })
+    }
+
+    private func resolveNotched14(sessions: Int) -> NotchGeometry {
+        NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14,
+            listContentHeight: threeRows,
+            pillContentWidth: PillMetrics.contentWidth(sessionCount: sessions))
     }
 
     @Test("the collapsed window is exactly the union, and nothing more")
@@ -115,17 +209,32 @@ struct NotchGeometryTests {
         #expect(g.collapsedFrame.maxY == g.screenFrame.maxY)
     }
 
-    @Test("the collapsed window starts at the left cap's left edge, just before the notch")
-    func panelXIsLeftCapMinX() {
+    @Test("by default the collapsed window starts at the notch and takes no menu strip")
+    func collapsedStartsAtTheNotchByDefault() {
         let g = NotchGeometryResolver.resolve(
             screen: ScreenFixture.notched14, listContentHeight: threeRows)
-        // The cap is a few real screen pixels left of the notch's own edge, so
-        // painting from here means OUR rounded corner reveals the black, rather
-        // than the invisible one under the camera housing.
-        #expect(g.leftCapRect.width > 0)
-        #expect(g.leftCapRect.maxX == g.notchRect.minX - NotchLayout.default.pillGap)
+        // The default cap is zero: the strip immediately left of the notch is
+        // where macOS puts the frontmost app's own menus, and a covered menu is
+        // worse than a covered status icon — the clicks are swallowed either way.
+        #expect(g.leftCapRect.width == 0)
+        #expect(g.collapsedFrame.minX == g.notchRect.minX)
+        #expect(g.expandedFrame.minX == g.collapsedFrame.minX)
+    }
+
+    @Test("the decorative left cap still works, for anyone who opts back in")
+    func leftCapIsOptIn() {
+        // The M3a maths, kept alive behind one constructor argument. The cap is a
+        // few real screen pixels left of the notch's own edge, so painting from
+        // here means OUR rounded corner reveals the black, rather than the
+        // invisible one under the camera housing.
+        let layout = NotchLayout(leftCapWidth: 14)
+        let g = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14, listContentHeight: threeRows, layout: layout)
+        #expect(g.leftCapRect.width == 14)
+        #expect(g.leftCapRect.maxX == g.notchRect.minX - layout.pillGap)
         #expect(g.collapsedFrame.minX == g.leftCapRect.minX)
         #expect(g.expandedFrame.minX == g.collapsedFrame.minX)
+        #expect(NotchGeometryResolver.check(g).isSatisfied)
     }
 
     @Test("no interactive chrome sits in the notch's x-range")
@@ -331,6 +440,7 @@ struct NotchGeometryTests {
             bandHeight: g.bandHeight,
             notchRect: g.notchRect,
             pillRect: g.pillRect,
+            pillContentRect: g.pillContentRect,
             pillHotRect: g.pillHotRect.insetBy(dx: 0, dy: -20),
             leftCapRect: g.leftCapRect,
             collapsedFrame: g.collapsedFrame.insetBy(dx: 0, dy: -20),

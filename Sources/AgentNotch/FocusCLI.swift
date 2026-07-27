@@ -365,6 +365,23 @@ enum FocusCLI {
                 for violation in report.violations { print("    \(violation)") }
             }
 
+            // How much menu bar we occupy, in BOTH pill states. This is the
+            // number the occlusion bug is measured in, and printing it is what
+            // makes "we shrank the footprint" checkable rather than asserted.
+            for (label, sessions) in [("idle (0)", 0), ("busy (3)", 3)] {
+                let g = NotchGeometryResolver.resolve(
+                    screen: metrics,
+                    listContentHeight: threeRows,
+                    pillContentWidth: PillMetrics.contentWidth(sessionCount: sessions))
+                let waste = g.collapsedFrame.maxX - g.pillContentRect.maxX
+                let f = { (v: CGFloat) in String(format: "%.0f", v) }
+                print("  footprint \(label.padding(toLength: 9, withPad: " ", startingAt: 0))"
+                    + "collapsed \(f(g.collapsedFrame.minX))…\(f(g.collapsedFrame.maxX))"
+                    + "  \(f(g.collapsedFrame.width)) pt"
+                    + "   trailing waste \(f(waste)) pt")
+                if !NotchGeometryResolver.check(g).isSatisfied { ok = false }
+            }
+
             if verbose {
                 print(simulateTransition(resolved))
             }

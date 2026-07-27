@@ -86,20 +86,35 @@ public struct ScreenMetrics: Sendable, Equatable {
 /// Hand-tunable constants. Separated from the derivation so the invariant below
 /// keeps working when someone changes a number.
 public struct NotchLayout: Sendable, Equatable {
-    /// Width of the pill's LAYOUT SLOT. The visible capsule is drawn narrower and
-    /// centred inside it, so the hover target is forgiving without the black
-    /// shape growing.
-    public var pillSlotWidth: CGFloat
+    /// Slack between the DRAWN capsule and the layout slot the window reserves
+    /// for it.
+    ///
+    /// Zero, and that is a position rather than a placeholder: the slot is menu
+    /// bar the window paints opaque black, so every point of padding is a point
+    /// of somebody else's status icon covered — and, because
+    /// `FirstMouseHostingView.hitTest` returns nil rather than forwarding,
+    /// un-clickable too. `PillMetrics` is the single source for how wide the
+    /// capsule really is, and `check` asserts the slot has not drifted from it.
+    public var pillPadding: CGFloat
     /// Gap between the notch's right edge and the pill slot. Also the reason
     /// `pillRect` never intersects `notchRect`, which the invariant asserts.
     public var pillGap: CGFloat
-    /// Horizontal slop added to the pill for hover purposes only.
+    /// Hover slop on the NOTCH side of the pill.
     ///
-    /// Vertical slop is deliberately ZERO: the collapsed window is the union of
-    /// the notch and this rect, so a vertical expansion would push the window
-    /// below the menu bar and create exactly the dead zone this design exists to
-    /// avoid.
-    public var hoverSlop: CGFloat
+    /// FREE, up to `pillGap`: it lands in the notch band the collapsed window
+    /// already occupies, so widening the hover target on this side costs no menu
+    /// bar pixels at all. That asymmetry with `hoverSlopTrailing` is the whole
+    /// trick, and `check` asserts the leading edge really does stop at the notch.
+    public var hoverSlopLeading: CGFloat
+    /// Hover slop on the far side of the pill — the ONLY slop that is paid for
+    /// in the user's menu bar, because it is the edge facing the right-aligned
+    /// status item run. Kept small on purpose.
+    ///
+    /// Vertical slop, on both sides, is deliberately ZERO: the collapsed window
+    /// is the union of the notch and this rect, so a vertical expansion would
+    /// push the window below the menu bar and create exactly the dead zone this
+    /// design exists to avoid.
+    public var hoverSlopTrailing: CGFloat
     /// Preferred expanded width. Reduced, never exceeded, if the screen is too
     /// narrow to the right of the notch.
     public var preferredPanelWidth: CGFloat
@@ -107,6 +122,12 @@ public struct NotchLayout: Sendable, Equatable {
     /// purely so the shape has a corner to round in real screen pixels
     /// instead of under the camera housing. No UI lives in it. Clamped to
     /// whatever room exists before the screen edge — see `leftCapRect`.
+    ///
+    /// ZERO by default. M3a bought that rounded corner for `leftCapWidth +
+    /// pillGap` points of the strip macOS reserves for the frontmost app's own
+    /// menus, and a menu is worse to occlude than an icon — the same clicks are
+    /// swallowed either way. Kept as a constructor argument, not deleted, so the
+    /// invariant keeps naming `leftCapRect` and the flourish is one number away.
     public var leftCapWidth: CGFloat
     /// Band height used when there is no hardware notch.
     public var fallbackBandHeight: CGFloat
@@ -117,18 +138,20 @@ public struct NotchLayout: Sendable, Equatable {
     public var corridorSlop: CGFloat
 
     public init(
-        pillSlotWidth: CGFloat = 52,
+        pillPadding: CGFloat = 0,
         pillGap: CGFloat = 6,
-        hoverSlop: CGFloat = 6,
+        hoverSlopLeading: CGFloat = 6,
+        hoverSlopTrailing: CGFloat = 2,
         preferredPanelWidth: CGFloat = 380,
-        leftCapWidth: CGFloat = 14,
+        leftCapWidth: CGFloat = 0,
         fallbackBandHeight: CGFloat = 26,
         maxListFraction: CGFloat = 0.6,
         corridorSlop: CGFloat = 14
     ) {
-        self.pillSlotWidth = pillSlotWidth
+        self.pillPadding = pillPadding
         self.pillGap = pillGap
-        self.hoverSlop = hoverSlop
+        self.hoverSlopLeading = hoverSlopLeading
+        self.hoverSlopTrailing = hoverSlopTrailing
         self.preferredPanelWidth = preferredPanelWidth
         self.leftCapWidth = leftCapWidth
         self.fallbackBandHeight = fallbackBandHeight
@@ -161,9 +184,15 @@ public struct NotchGeometry: Sendable, Equatable {
     /// `pillHotRect.minX` when there is none.
     public let notchRect: CGRect
     /// The pill's layout slot: full band height, top pinned to the screen top.
-    /// The visible 22 pt capsule is centred inside it by the view.
+    /// The capsule is centred inside it by the view.
     public let pillRect: CGRect
-    /// `pillRect` widened by `hoverSlop`. Same height, same top edge.
+    /// The rect the capsule is actually PAINTED in — `pillRect` less
+    /// `pillPadding`, and the same thing at the default padding of zero.
+    ///
+    /// Carried separately so the footprint is checkable: `check` refuses a
+    /// collapsed window that reserves meaningfully more menu bar than this.
+    public let pillContentRect: CGRect
+    /// `pillRect` widened by the two hover slops. Same height, same top edge.
     public let pillHotRect: CGRect
     /// A small decorative strip immediately left of `notchRect`, or a
     /// degenerate zero-width rect pinned at `notchRect.minX` when there is
@@ -243,9 +272,15 @@ public enum NotchGeometryResolver {
     /// step function around the animation, so this has to be known before the
     /// window grows; the view layer pins its row heights to make the estimate
     /// exact rather than approximate.
+    ///
+    /// `pillContentWidth` is the same idea for the collapsed width: the capsule
+    /// is narrower with no sessions than with some, and the window must reserve
+    /// the smaller footprint in that case rather than sit on menu bar it is not
+    /// using. Comes from `PillMetrics.contentWidth(sessionCount:)`.
     public static func resolve(
         screen: ScreenMetrics,
         listContentHeight: CGFloat,
+        pillContentWidth: CGFloat = PillMetrics.contentWidth(sessionCount: 1),
         layout: NotchLayout = .default
     ) -> NotchGeometry {
         let f = screen.frame
@@ -262,7 +297,11 @@ public enum NotchGeometryResolver {
         // notch: the frontmost app's menus are always LEFT of the notch and
         // status items are right-aligned, so the first few points to the right
         // of the notch are the emptiest real estate in the menu bar.
-        let pillW = min(layout.pillSlotWidth, f.width)
+        // The slot is the drawn capsule plus padding, NOT a fixed constant. The
+        // window paints this rect opaque black over the menu bar, so a slot
+        // wider than its content is menu bar taken from other apps to show
+        // nothing.
+        let pillW = min(pillContentWidth + 2 * layout.pillPadding, f.width)
         var pillX: CGFloat
         if hasNotch {
             pillX = notchX + notchW + layout.pillGap
@@ -271,12 +310,13 @@ public enum NotchGeometryResolver {
             // the same place the notch would have been.
             pillX = f.midX - pillW / 2
         }
-        pillX = min(pillX, f.maxX - pillW - layout.hoverSlop)
-        pillX = max(pillX, f.minX + layout.hoverSlop)
+        pillX = min(pillX, f.maxX - pillW - layout.hoverSlopTrailing)
+        pillX = max(pillX, f.minX + layout.hoverSlopLeading)
         let pillRect = CGRect(x: pillX, y: bandY, width: pillW, height: bandHeight)
+        let pillContentRect = pillRect.insetBy(dx: layout.pillPadding, dy: 0)
 
-        var hotX = pillRect.minX - layout.hoverSlop
-        var hotMaxX = pillRect.maxX + layout.hoverSlop
+        var hotX = pillRect.minX - layout.hoverSlopLeading
+        var hotMaxX = pillRect.maxX + layout.hoverSlopTrailing
         hotX = max(hotX, f.minX)
         hotMaxX = min(hotMaxX, f.maxX)
         // Slop is horizontal only. A vertical expansion would drag the collapsed
@@ -335,6 +375,7 @@ public enum NotchGeometryResolver {
             bandHeight: bandHeight,
             notchRect: notchRect,
             pillRect: pillRect,
+            pillContentRect: pillContentRect,
             pillHotRect: pillHotRect,
             leftCapRect: leftCapRect,
             collapsedFrame: collapsedFrame,
@@ -363,6 +404,16 @@ extension NotchGeometryResolver {
     /// Tolerance in points. Rects come out of `NSScreen` on half-point
     /// boundaries on Retina panels.
     public static let epsilon: CGFloat = 0.01
+
+    /// How much menu bar the collapsed window may reserve to the RIGHT of the
+    /// drawn capsule.
+    ///
+    /// This is the number the occlusion bug was made of: the window used to end
+    /// 10 pt past the capsule with a fixed 52 pt slot inside a 64 pt hot rect,
+    /// all of it opaque black over the right-aligned status item run. Asserting a
+    /// ceiling makes the footprint a structural property instead of a tuning that
+    /// drifts back.
+    public static let maxTrailingWaste: CGFloat = 8
 
     /// `collapsedFrame ⊆ (notchRect ∪ pillHotRect ∪ leftCapRect)` — asserted
     /// live on every geometry change.
@@ -420,15 +471,39 @@ extension NotchGeometryResolver {
         if !eq(g.collapsedFrame.height, g.bandHeight) {
             bad.append("collapsedFrame.height \(g.collapsedFrame.height) != bandHeight \(g.bandHeight)")
         }
+        // THE FOOTPRINT GUARDS. Everything above bounds the window to the shape
+        // it draws; these two bound the shape itself, because a shape wider than
+        // its content is still menu bar taken from other apps.
+        if !contains(g.pillRect, g.pillContentRect) {
+            bad.append("pillRect \(g.pillRect) does not contain pillContentRect \(g.pillContentRect) — the window reserves less than the pill paints")
+        }
+        let trailingWaste = g.collapsedFrame.maxX - g.pillContentRect.maxX
+        if trailingWaste > maxTrailingWaste + eps {
+            bad.append("the collapsed window reserves \(trailingWaste) pt of menu bar right of the drawn pill (max \(maxTrailingWaste))")
+        }
         if g.hasNotch {
             if g.notchRect.width <= 1 {
                 bad.append("hasNotch but notchRect.width == \(g.notchRect.width)")
             }
+            // Leading hover slop is free only while it stays inside the notch
+            // band the window already owns. Past that it starts costing the
+            // frontmost app's menu strip, silently.
+            if g.pillHotRect.minX < g.notchRect.maxX - eps {
+                bad.append("pillHotRect.minX \(g.pillHotRect.minX) reaches left of notchRect.maxX \(g.notchRect.maxX) — leading slop is no longer free")
+            }
             // No interactive chrome in the notch x-range, enforced at the source.
-            if g.notchRect.intersects(g.pillRect) {
+            //
+            // The `isEmpty` guards are LOAD-BEARING, not tidiness. Measured:
+            // `CGRect.intersects` returns TRUE for a zero-width rect pinned
+            // inside the other rect's x-range, even though that rect's own
+            // `isEmpty` is true — so a degenerate `leftCapRect` at
+            // `notchRect.minX` reads as an overlap. `union` disagrees and
+            // ignores the same rect, which is why the collapsed frame is right
+            // while the check was wrong.
+            if !g.pillRect.isEmpty, g.notchRect.intersects(g.pillRect) {
                 bad.append("pillRect intersects notchRect — an invisible click target")
             }
-            if g.notchRect.intersects(g.leftCapRect) {
+            if !g.leftCapRect.isEmpty, g.notchRect.intersects(g.leftCapRect) {
                 bad.append("leftCapRect intersects notchRect")
             }
         } else {
@@ -489,6 +564,7 @@ extension NotchGeometry: CustomStringConvertible {
             \(r("notchRect", notchRect))
             \(r("leftCapRect", leftCapRect))
             \(r("pillRect", pillRect))
+            \(r("pillContentRect", pillContentRect))
             \(r("pillHotRect", pillHotRect))
             \(r("collapsedFrame", collapsedFrame))
             \(r("expandedFrame", expandedFrame))

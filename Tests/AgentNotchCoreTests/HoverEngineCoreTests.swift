@@ -6,8 +6,16 @@ import Testing
 
 /// Zones from the real 14" fixture, so the distances the velocity gate sees are
 /// the distances it will see in production.
+///
+/// `pillContentWidth` is PINNED rather than left to the default. The collapsed
+/// width tracks the session count now, and `velocityGateRestarts` flicks across
+/// `pillHotRect` in 20 ms and asserts it reads as fast: at the zero-session width
+/// that crossing is 30 pt, i.e. 1300 pt/s against a 1400 pt/s gate, and the test
+/// would fail for a reason that has nothing to do with hover.
 private let geometry = NotchGeometryResolver.resolve(
-    screen: ScreenFixture.notched14, listContentHeight: 140)
+    screen: ScreenFixture.notched14,
+    listContentHeight: 140,
+    pillContentWidth: PillMetrics.contentWidth(sessionCount: 3))
 private let zones = geometry.hoverZones
 
 private var pill: CGPoint { CGPoint(x: geometry.pillRect.midX, y: geometry.pillRect.midY) }

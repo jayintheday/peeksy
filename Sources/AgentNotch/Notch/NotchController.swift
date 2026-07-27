@@ -100,6 +100,8 @@ final class NotchController {
     private var settleTask: Task<Void, Never>?
     private var isHidden = false
     private var visibilityTimer: Timer?
+    /// Last width handed to the resolver, for change detection in `observeStore`.
+    private var lastPillWidth: CGFloat?
 
     init(store: SessionStore) {
         self.store = store
@@ -205,8 +207,28 @@ final class NotchController {
         return NotchGeometryResolver.resolve(
             screen: screens.metrics(for: screen),
             listContentHeight: currentContentHeight(),
+            pillContentWidth: currentPillWidth(),
             layout: layout
         )
+    }
+
+    /// The collapsed window's width is a function of the pill, and the pill is
+    /// narrower with nothing to count. Sitting on menu bar we are not drawing in
+    /// is what covers other apps' status icons, so the frame tracks the content.
+    private func currentPillWidth() -> CGFloat {
+        PillMetrics.contentWidth(sessionCount: store.aggregate.count)
+    }
+
+    /// Has the collapsed width moved since the last time anyone asked?
+    ///
+    /// `store.aggregate` is published in the same `publish()` as `store.rows`, so
+    /// the already-tracked `rows` read is enough to be told about it — this needs
+    /// no new observation dependency, only a comparison.
+    private func pillWidthChanged() -> Bool {
+        let width = currentPillWidth()
+        guard width != lastPillWidth else { return false }
+        lastPillWidth = width
+        return true
     }
 
     private func currentContentHeight() -> CGFloat {
@@ -560,7 +582,13 @@ final class NotchController {
                 // ten snapshots a second; re-deriving row labels and rects that
                 // nobody can see, all day, is exactly the kind of cost a 24/7
                 // menu-bar app cannot afford. `open(as:)` refreshes on the way in.
-                if self.phase.isOpen { self.refreshGeometry() }
+                //
+                // …EXCEPT that the COLLAPSED width now tracks the pill, so the
+                // one content change that must move a closed window is the pill
+                // growing or shrinking. `pillWidthChanged` is two-valued, so this
+                // costs a refresh on a 0 ↔ 1 session crossing and nothing on the
+                // other nine publishes that second.
+                if self.phase.isOpen || self.pillWidthChanged() { self.refreshGeometry() }
                 self.observeStore()
             }
         }

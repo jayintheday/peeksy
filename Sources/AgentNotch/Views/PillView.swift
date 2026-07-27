@@ -9,19 +9,20 @@ import SwiftUI
 /// The dot breathes while something is working — and ONLY then. See `breathing`.
 struct PillView: View {
     let aggregate: Aggregate
-    /// The pill's layout SLOT, from `NotchGeometry.pillRect`. The capsule is
-    /// drawn smaller and centred inside it: the hover target is forgiving
-    /// without the black shape growing to match.
+    /// The pill's layout SLOT, from `NotchGeometry.pillRect` — all of which is
+    /// the click target.
     let slotWidth: CGFloat
+    /// The capsule's own width, from `NotchGeometry.pillContentRect`.
+    ///
+    /// Handed down from the geometry rather than decided here, so the menu bar
+    /// pixels the window RESERVES and the pixels it PAINTS cannot drift apart.
+    /// `NotchGeometryResolver.check` asserts they have not.
+    let contentWidth: CGFloat
     let bandHeight: CGFloat
     /// False when the panel is ordered out — no menu bar, because another app is
     /// full screen, the bar is hidden, or the status item overflowed. An
     /// animation nobody can see is pure battery.
     let isVisible: Bool
-
-    private static let capsuleWidth: CGFloat = 44
-    private static let capsuleHeight: CGFloat = 22
-    private static let dotSize: CGFloat = 6
 
     @State private var breathIn = false
 
@@ -88,10 +89,7 @@ struct PillView: View {
                     .foregroundStyle(.white)
             }
         }
-        .frame(
-            width: aggregate.count > 0 ? Self.capsuleWidth : Self.capsuleHeight,
-            height: Self.capsuleHeight
-        )
+        .frame(width: contentWidth, height: PillMetrics.capsuleHeight)
         .background(
             Capsule().fill(Color.white.opacity(needsAttention ? 0.10 : 0.06))
         )
@@ -111,7 +109,7 @@ struct PillView: View {
     private var dot: some View {
         Circle()
             .fill(tint.notchColour)
-            .frame(width: Self.dotSize, height: Self.dotSize)
+            .frame(width: PillMetrics.dotSize, height: PillMetrics.dotSize)
             .scaleEffect(breathIn ? 1.30 : 1.0)
             .opacity(breathIn ? 0.55 : 1.0)
             // A halo, so "working" survives being a 6 pt dot on black. Part of
@@ -119,7 +117,7 @@ struct PillView: View {
             .background(
                 Circle()
                     .fill(tint.notchColour.opacity(breathIn ? 0.20 : 0.0))
-                    .frame(width: Self.dotSize * 2.6, height: Self.dotSize * 2.6)
+                    .frame(width: PillMetrics.dotSize * 2.6, height: PillMetrics.dotSize * 2.6)
             )
             .animation(.easeInOut(duration: 0.25), value: tint)
     }
