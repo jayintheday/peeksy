@@ -7,7 +7,7 @@ MacBook's notch. The pill's colour is the most urgent thing happening across
 every Claude Code session you have running. Hover to peek at the list, click to
 pin it, click a row to jump straight to that session's terminal tab.
 
-<!-- TODO: screenshot -->
+<img src="assets/screenshot.png" alt="AgentNotch expanded beside the notch, showing one working session" width="100%">
 
 The problem it solves: you start three agents in three terminal tabs, go and do
 something else, and then have no idea which one finished, which one is still

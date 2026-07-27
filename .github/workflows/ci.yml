@@ -14,6 +14,11 @@ jobs:
   test:
     name: Build & test
     runs-on: macos-15
+    # A hang must fail, not sit there. The first run of this workflow spent two
+    # hours in `swift test` before anyone noticed, and GitHub does not release
+    # a job's logs until it finishes — so a hang is also invisible, which is
+    # worse than a failure. Ceilings everywhere below.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +35,24 @@ jobs:
       # locally. Anything that needs a screen lives behind the AppKit split
       # line and is verified by hand; see LEARNINGS.md.
       - name: Test
-        run: swift test
+        timeout-minutes: 8
+        # Unbuffered, so the log shows every "Test … started" line as it
+        # happens. When this times out, the LAST started test that never
+        # reported "passed" is the one that hung — which is the only way to
+        # identify it, since a cancelled job publishes no logs at all.
+        run: swift test --no-parallel 2>&1 | tee test-output.txt
+
+      - name: Show what was still running if the tests failed
+        if: failure()
+        run: |
+          echo "=== last 40 lines ==="
+          tail -40 test-output.txt || true
+          echo "=== started but never passed ==="
+          # Every test that announced itself, minus every test that finished.
+          comm -23 \
+            <(grep -o 'Test "[^"]*" started' test-output.txt | sed 's/ started$//' | sort -u) \
+            <(grep -o 'Test "[^"]*" passed' test-output.txt | sed 's/ passed$//' | sort -u) \
+            || true
 
       # Proves the shippable artefact assembles and signs, which `swift build`
       # alone does not: the Info.plist, the bundled hook script and the
