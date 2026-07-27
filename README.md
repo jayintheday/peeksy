@@ -1,13 +1,13 @@
-# AgentNotch
+# Peeksy
 
 **See which agent session is waiting on you, without going to look.**
 
-AgentNotch is a background macOS app that puts a small pill beside your
+Peeksy is a background macOS app that puts a small pill beside your
 MacBook's notch. The pill's colour is the most urgent thing happening across
 every Claude Code session you have running. Hover to peek at the list, click to
 pin it, click a row to jump straight to that session's terminal tab.
 
-<img src="assets/screenshot.png" alt="AgentNotch expanded beside the notch, showing one working session" width="100%">
+<img src="assets/screenshot.png" alt="Peeksy expanded beside the notch, showing one working session" width="100%">
 
 The problem it solves: you start three agents in three terminal tabs, go and do
 something else, and then have no idea which one finished, which one is still
@@ -35,10 +35,10 @@ changes on every build, which silently revokes the app's Automation permission
 on every update. Building it yourself avoids both. See [Signing](#signing).
 
 ```sh
-git clone https://github.com/<you>/agent-notch.git
-cd agent-notch
-./scripts/build_app.sh --install      # → ~/Applications/AgentNotch.app
-open ~/Applications/AgentNotch.app
+git clone https://github.com/jayintheday/peeksy.git
+cd peeksy
+./scripts/build_app.sh --install      # → ~/Applications/Peeksy.app
+open ~/Applications/Peeksy.app
 ```
 
 The pill should appear beside the notch. Then, **two things to do once**:
@@ -64,14 +64,14 @@ already running when you launched are found by a `ps`/`lsof` scan and shown as
 The app has no Dock icon and no menu bar menu, so both controls live on the
 **gear icon at the right of the panel header**:
 
-- **Launch at login** — off by default. Turn it on and macOS starts AgentNotch
+- **Launch at login** — off by default. Turn it on and macOS starts Peeksy
   for you; it will also appear in System Settings → General → Login Items, and
   turning it off there wins.
 - **Quit** — stops the app. The socket is unlinked on the way out, so the hook
   drops back to its zero-fork fast path and Claude Code behaves exactly as if
-  AgentNotch had never been installed.
+  Peeksy had never been installed.
 
-To start it again: `open ~/Applications/AgentNotch.app`, or turn on launch at
+To start it again: `open ~/Applications/Peeksy.app`, or turn on launch at
 login and it handles itself.
 
 ## What it reads, and what it never does
@@ -86,13 +86,13 @@ Everything is local. There is no network code in this app and no telemetry.
 | Terminal, via AppleScript | only to raise the tab you clicked |
 
 It writes to exactly two places: its own folder in `~/Library/Application
-Support/AgentNotch`, and — only when you approve the diff — an **appended** hooks
+Support/Peeksy`, and — only when you approve the diff — an **appended** hooks
 block in `~/.claude/settings.json`. That file routinely carries other tools'
 hooks, so the installer is append-only, backed up, atomic, and preview-gated. It
 never rewrites what it did not add.
 
 **The hook fails open, by contract.** It always exits 0, never prints to stdout,
-and its first line is a check for the socket — so when AgentNotch is not running
+and its first line is a check for the socket — so when Peeksy is not running
 it costs zero forks and Claude Code cannot tell it exists.
 
 ## Session states
@@ -128,7 +128,7 @@ bites after a rebuild: an ad-hoc signature changes on every build, so macOS
 silently denies Apple events with `-1743` and shows no prompt at all.
 
 ```sh
-tccutil reset AppleEvents com.vijaypatel.agentnotch
+tccutil reset AppleEvents com.vijaypatel.peeksy
 ```
 
 then click a row once to get a fresh prompt.
@@ -137,8 +137,8 @@ then click a row once to get a fresh prompt.
 running — `scripts/doctor.sh` answers both. The hook is intentionally silent on
 every failure, so it will never tell you itself.
 
-**You would rather edit `settings.json` by hand.** `AgentNotch
---print-hook-json` prints just AgentNotch's block — merge its nine entries into
+**You would rather edit `settings.json` by hand.** `Peeksy
+--print-hook-json` prints just Peeksy's block — merge its nine entries into
 your `hooks` object. It never reads your settings file, so it also works when
 that file is missing or has been broken by a half-finished edit, and it is safe
 to paste into a bug report.
@@ -151,8 +151,8 @@ diff against your real file.
 
 ```sh
 scripts/install_hook.sh --uninstall-hook    # round-trips settings.json byte-identically
-rm -rf ~/Applications/AgentNotch.app
-rm -rf ~/Library/Application\ Support/AgentNotch
+rm -rf ~/Applications/Peeksy.app
+rm -rf ~/Library/Application\ Support/Peeksy
 ```
 
 If you turned on launch at login, quit the app before deleting it, or remove it
@@ -161,7 +161,7 @@ from System Settings → General → Login Items.
 ## How it works
 
 ```
-claude ──hook──▶ agent-notch-hook.sh ──POST──▶ unix socket ──▶ EventRouter
+claude ──hook──▶ peeksy-hook.sh ──POST──▶ unix socket ──▶ EventRouter
                                                                    │
                                                           ClaudeCodeAdapter
                                                                    │
@@ -173,10 +173,10 @@ claude ──hook──▶ agent-notch-hook.sh ──POST──▶ unix socket �
 
 The codebase is split hard at AppKit:
 
-- **`Sources/AgentNotchCore`** — Foundation only. The state machine, the wire
+- **`Sources/PeeksyCore`** — Foundation only. The state machine, the wire
   format, the geometry maths, the hover state machine, the settings merge, the
   orb. All pure value types, all tested.
-- **`Sources/AgentNotch`** — AppKit and SwiftUI. Thin shells over the above.
+- **`Sources/Peeksy`** — AppKit and SwiftUI. Thin shells over the above.
 
 Tests only depend on Core, which is why logic that could be wrong lives there.
 Adding a second agent runtime is an `AgentAdapter` conformance and an
@@ -195,12 +195,12 @@ shape with transparent corners, because macOS does not mask an `.icns`.
 Useful flags on the built binary:
 
 ```sh
-AgentNotch --doctor        # diagnostics
-AgentNotch --geometry      # notch rects, and the layout invariant
-AgentNotch --menubar       # who else is in the menu bar, and whether we fit
-AgentNotch --login-item    # launch-at-login status (read-only)
-AgentNotch --slice         # plain-window UI, for when the notch is in the way
-AgentNotch --orb-lab       # the orb tuning harness
+Peeksy --doctor        # diagnostics
+Peeksy --geometry      # notch rects, and the layout invariant
+Peeksy --menubar       # who else is in the menu bar, and whether we fit
+Peeksy --login-item    # launch-at-login status (read-only)
+Peeksy --slice         # plain-window UI, for when the notch is in the way
+Peeksy --orb-lab       # the orb tuning harness
 ```
 
 ## Known gaps
@@ -238,7 +238,7 @@ focus and process scanning are disqualifying.
 
 Issues and PRs welcome. Two things to know:
 
-1. **Put logic in `AgentNotchCore` as pure value types.** The test target only
+1. **Put logic in `PeeksyCore` as pure value types.** The test target only
    depends on Core.
 2. **Never run `screencapture`.** Verify window geometry with
    `CGWindowListCopyWindowInfo` metadata instead. `--geometry` and `--menubar`

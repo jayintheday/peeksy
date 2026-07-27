@@ -1,22 +1,22 @@
 #!/bin/bash
-# Assemble and ad-hoc sign dist/AgentNotch.app.
+# Assemble and ad-hoc sign dist/Peeksy.app.
 #
 # Adapted from open-focus (MIT, © 2026 Filip Sokolowski) — see NOTICE.
 #
 # Usage:
-#   scripts/build_app.sh              build dist/AgentNotch.app
+#   scripts/build_app.sh              build dist/Peeksy.app
 #   scripts/build_app.sh --install    also copy it to ~/Applications
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-APP_NAME="AgentNotch"
-BUNDLE_ID="com.vijaypatel.agentnotch"
+APP_NAME="Peeksy"
+BUNDLE_ID="com.vijaypatel.peeksy"
 VERSION="0.1.0"
-BINARY="AgentNotch"
+BINARY="Peeksy"
 DIST="dist"
 APP="$DIST/$APP_NAME.app"
-HOOK_SRC="hooks/agent-notch-hook.sh"
+HOOK_SRC="hooks/peeksy-hook.sh"
 ICON_SRC="assets/AppIcon.png"
 ICON="AppIcon.icns"
 
@@ -73,8 +73,8 @@ fi
 # The hook lives inside the bundle so `claude` invokes a stable path that picks
 # up every rebuild automatically. Defensive: the hook may not have landed yet.
 if [ -f "$HOOK_SRC" ]; then
-    cp "$HOOK_SRC" "$APP/Contents/Resources/agent-notch-hook.sh"
-    chmod +x "$APP/Contents/Resources/agent-notch-hook.sh"
+    cp "$HOOK_SRC" "$APP/Contents/Resources/peeksy-hook.sh"
+    chmod +x "$APP/Contents/Resources/peeksy-hook.sh"
     echo "    bundled $HOOK_SRC"
 else
     echo "    WARNING: $HOOK_SRC not found — bundling without the hook." >&2
@@ -92,18 +92,18 @@ cat > "$APP/Contents/Info.plist" << PLIST
     <key>CFBundleExecutable</key><string>$APP_NAME</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundleName</key><string>$APP_NAME</string>
-    <key>CFBundleDisplayName</key><string>Agent Notch</string>
+    <key>CFBundleDisplayName</key><string>Peeksy</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key><string>$VERSION</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>AgentNotchCommit</key><string>$GIT_COMMIT</string>
-    <key>AgentNotchDirty</key><string>$GIT_DIRTY</string>
-    <key>AgentNotchBuildDate</key><string>$BUILD_DATE</string>
+    <key>PeeksyCommit</key><string>$GIT_COMMIT</string>
+    <key>PeeksyDirty</key><string>$GIT_DIRTY</string>
+    <key>PeeksyBuildDate</key><string>$BUILD_DATE</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHumanReadableCopyright</key><string>© 2026 Vijay Patel. Portions © 2026 Filip Sokolowski (MIT).</string>
-    <key>NSAppleEventsUsageDescription</key><string>AgentNotch brings the Terminal window running your agent session to the front when you click it.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Peeksy brings the Terminal window running your agent session to the front when you click it.</string>
 </dict>
 </plist>
 PLIST

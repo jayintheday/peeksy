@@ -1,15 +1,15 @@
-AgentNotch bundles or adapts code from the following third-party projects.
+Peeksy bundles or adapts code from the following third-party projects.
 
 ================================================================================
 open-focus — https://github.com/fillsoko/open-focus
 ================================================================================
 
-Portions of Sources/AgentNotchCore/Notch/NotchGeometry.swift (the
+Portions of Sources/PeeksyCore/Notch/NotchGeometry.swift (the
 auxiliaryTopLeftArea/auxiliaryTopRightArea width derivation) and
-Sources/AgentNotch/Notch/NotchGeometry.swift (built-in screen selection), the
-NSPanel configuration in Sources/AgentNotch/Notch/NotchPanel.swift, the
+Sources/Peeksy/Notch/NotchGeometry.swift (built-in screen selection), the
+NSPanel configuration in Sources/Peeksy/Notch/NotchPanel.swift, the
 UnevenRoundedRectangle notch-continuation shape in
-Sources/AgentNotch/Views/NotchChrome.swift, and scripts/build_app.sh are
+Sources/Peeksy/Views/NotchChrome.swift, and scripts/build_app.sh are
 adapted from open-focus.
 
 MIT License
@@ -38,11 +38,11 @@ SOFTWARE.
 thinking-orbs — https://github.com/Jakubantalik/thinking-orbs
 ================================================================================
 
-Sources/AgentNotchCore/Orb/OrbDot.swift, OrbMath.swift, OrbMode.swift,
+Sources/PeeksyCore/Orb/OrbDot.swift, OrbMath.swift, OrbMode.swift,
 OrbitsProfile.swift, OrbitsMode.swift and GlobeMode.swift are a port of
 thinking-orbs' src/engine/core.ts, src/engine/orbits.ts and the drawGlobe half
 of src/engine/lattice.ts, with the tuning from src/engine/profiles.ts and
-src/presets.ts. The rendering in Sources/AgentNotch/Views/OrbCanvas.swift
+src/presets.ts. The rendering in Sources/Peeksy/Views/OrbCanvas.swift
 follows that project's `paint`.
 
 Upstream is TypeScript rendering to an HTML5 canvas; this is a Swift port to

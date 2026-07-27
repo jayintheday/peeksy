@@ -1,21 +1,21 @@
 #!/bin/bash
-# Run AgentNotch's built-in diagnostics against the installed (or freshly built)
+# Run Peeksy's built-in diagnostics against the installed (or freshly built)
 # app bundle. The bundle matters: Automation permission is granted to the signed
-# bundle, not to `swift run`, so `.build/release/AgentNotch --doctor` would report
+# bundle, not to `swift run`, so `.build/release/Peeksy --doctor` would report
 # a different TCC identity than the one that actually does the focusing.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-INSTALLED="$HOME/Applications/AgentNotch.app"
-BUILT="dist/AgentNotch.app"
+INSTALLED="$HOME/Applications/Peeksy.app"
+BUILT="dist/Peeksy.app"
 
-if [ -x "$INSTALLED/Contents/MacOS/AgentNotch" ]; then
+if [ -x "$INSTALLED/Contents/MacOS/Peeksy" ]; then
     APP="$INSTALLED"
-elif [ -x "$BUILT/Contents/MacOS/AgentNotch" ]; then
+elif [ -x "$BUILT/Contents/MacOS/Peeksy" ]; then
     APP="$BUILT"
 else
-    echo "AgentNotch.app is not built." >&2
+    echo "Peeksy.app is not built." >&2
     echo "" >&2
     echo "Looked in:" >&2
     echo "  $INSTALLED" >&2
@@ -28,4 +28,4 @@ fi
 
 echo "using: $APP"
 echo ""
-exec "$APP/Contents/MacOS/AgentNotch" --doctor
+exec "$APP/Contents/MacOS/Peeksy" --doctor

@@ -30,7 +30,7 @@ jobs:
       - name: Build
         run: swift build -v
 
-      # The whole suite is AgentNotchCore — Foundation only, no AppKit, no
+      # The whole suite is PeeksyCore — Foundation only, no AppKit, no
       # window server — so it runs headless on a CI box exactly as it does
       # locally. Anything that needs a screen lives behind the AppKit split
       # line and is verified by hand; see LEARNINGS.md.
@@ -61,10 +61,10 @@ jobs:
         run: ./scripts/build_app.sh
 
       - name: Verify the signature
-        run: codesign --verify --verbose=2 dist/AgentNotch.app
+        run: codesign --verify --verbose=2 dist/Peeksy.app
 
       - name: Check the hook script shipped inside the bundle
-        run: test -x dist/AgentNotch.app/Contents/Resources/agent-notch-hook.sh
+        run: test -x dist/Peeksy.app/Contents/Resources/peeksy-hook.sh
 
   shellcheck:
     name: Shell scripts
@@ -72,4 +72,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck scripts/*.sh hooks/agent-notch-hook.sh
+        run: shellcheck scripts/*.sh hooks/peeksy-hook.sh

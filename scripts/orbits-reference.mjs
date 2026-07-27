@@ -1,5 +1,5 @@
 // Faithful transliteration of thinking-orbs' src/engine/core.ts, orbits.ts and
-// the drawGlobe half of lattice.ts, carrying AgentNotch's rate quantisation.
+// the drawGlobe half of lattice.ts, carrying Peeksy's rate quantisation.
 // Independent implementation used ONLY to generate expected values for
 // OrbitsModeTests / GlobeModeTests, so a transcription slip in the Swift port
 // shows up as a number mismatch rather than as a wrong-looking orb nobody may
