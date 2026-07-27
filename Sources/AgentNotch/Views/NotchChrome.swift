@@ -51,11 +51,14 @@ struct NotchChrome: View {
         return RectangleCornerRadii(
             // Flush with the screen's top edge in every state.
             topLeading: 0,
-            // On a notched display the collapsed shape's bottom-left corner sits
-            // under the hardware notch, where a radius would be invisible; once
-            // the panel hangs below the menu bar the same corner is very much
-            // visible and wants one. Without a notch it is always visible.
-            bottomLeading: geometry.hasNotch && !expanded ? 0 : r,
+            // The notch's OWN bottom-left corner sits under the camera
+            // housing, where a radius would be invisible — but
+            // `geometry.leftCapRect` gives this corner a few points of real
+            // screen pixels to curve into instead, mirroring the pill's
+            // rounded end on the right. Safe to round unconditionally: on
+            // the rare display with no room for the cap, this degenerates
+            // back to the old invisible-but-harmless case.
+            bottomLeading: r,
             bottomTrailing: r,
             topTrailing: 0
         )

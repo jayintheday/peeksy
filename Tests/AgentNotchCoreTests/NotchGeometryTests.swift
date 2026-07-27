@@ -107,7 +107,7 @@ struct NotchGeometryTests {
     func collapsedIsTheUnion() {
         let g = NotchGeometryResolver.resolve(
             screen: ScreenFixture.notched14, listContentHeight: threeRows)
-        #expect(g.collapsedFrame == g.notchRect.union(g.pillHotRect))
+        #expect(g.collapsedFrame == g.notchRect.union(g.pillHotRect).union(g.leftCapRect))
         // The whole design in one assertion: the window is never taller than the
         // menu bar while collapsed, so there is no transparent region below it to
         // swallow clicks meant for other apps.
@@ -115,14 +115,16 @@ struct NotchGeometryTests {
         #expect(g.collapsedFrame.maxY == g.screenFrame.maxY)
     }
 
-    @Test("the collapsed window starts at the notch's left edge")
-    func panelXIsNotchMinX() {
+    @Test("the collapsed window starts at the left cap's left edge, just before the notch")
+    func panelXIsLeftCapMinX() {
         let g = NotchGeometryResolver.resolve(
             screen: ScreenFixture.notched14, listContentHeight: threeRows)
-        // 0 + 663. Painting from here means the hardware's rounded corners reveal
-        // our black rather than the wallpaper.
-        #expect(g.collapsedFrame.minX == 663)
-        #expect(g.notchRect.minX == g.collapsedFrame.minX)
+        // The cap is a few real screen pixels left of the notch's own edge, so
+        // painting from here means OUR rounded corner reveals the black, rather
+        // than the invisible one under the camera housing.
+        #expect(g.leftCapRect.width > 0)
+        #expect(g.leftCapRect.maxX == g.notchRect.minX - NotchLayout.default.pillGap)
+        #expect(g.collapsedFrame.minX == g.leftCapRect.minX)
         #expect(g.expandedFrame.minX == g.collapsedFrame.minX)
     }
 
@@ -330,6 +332,7 @@ struct NotchGeometryTests {
             notchRect: g.notchRect,
             pillRect: g.pillRect,
             pillHotRect: g.pillHotRect.insetBy(dx: 0, dy: -20),
+            leftCapRect: g.leftCapRect,
             collapsedFrame: g.collapsedFrame.insetBy(dx: 0, dy: -20),
             expandedFrame: g.expandedFrame,
             listHeight: g.listHeight,

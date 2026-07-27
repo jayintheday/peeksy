@@ -103,6 +103,11 @@ public struct NotchLayout: Sendable, Equatable {
     /// Preferred expanded width. Reduced, never exceeded, if the screen is too
     /// narrow to the right of the notch.
     public var preferredPanelWidth: CGFloat
+    /// Width of a small decorative cap painted immediately left of the notch,
+    /// purely so the shape has a corner to round in real screen pixels
+    /// instead of under the camera housing. No UI lives in it. Clamped to
+    /// whatever room exists before the screen edge — see `leftCapRect`.
+    public var leftCapWidth: CGFloat
     /// Band height used when there is no hardware notch.
     public var fallbackBandHeight: CGFloat
     /// Ceiling on the list, as a fraction of screen height.
@@ -116,6 +121,7 @@ public struct NotchLayout: Sendable, Equatable {
         pillGap: CGFloat = 6,
         hoverSlop: CGFloat = 6,
         preferredPanelWidth: CGFloat = 380,
+        leftCapWidth: CGFloat = 14,
         fallbackBandHeight: CGFloat = 26,
         maxListFraction: CGFloat = 0.6,
         corridorSlop: CGFloat = 14
@@ -124,6 +130,7 @@ public struct NotchLayout: Sendable, Equatable {
         self.pillGap = pillGap
         self.hoverSlop = hoverSlop
         self.preferredPanelWidth = preferredPanelWidth
+        self.leftCapWidth = leftCapWidth
         self.fallbackBandHeight = fallbackBandHeight
         self.maxListFraction = maxListFraction
         self.corridorSlop = corridorSlop
@@ -158,8 +165,15 @@ public struct NotchGeometry: Sendable, Equatable {
     public let pillRect: CGRect
     /// `pillRect` widened by `hoverSlop`. Same height, same top edge.
     public let pillHotRect: CGRect
+    /// A small decorative strip immediately left of `notchRect`, or a
+    /// degenerate zero-width rect pinned at `notchRect.minX` when there is
+    /// no room for it or no notch. Never in `interactiveRects` — it exists
+    /// only so `NotchChrome` has real screen pixels to round the shape's
+    /// bottom-left corner into, mirroring the pill's rounded end on the
+    /// right, even though nothing is clickable here.
+    public let leftCapRect: CGRect
     /// THE INVARIANT, as a definition rather than a defence:
-    /// `collapsedFrame == notchRect ∪ pillHotRect`.
+    /// `collapsedFrame == notchRect ∪ pillHotRect ∪ leftCapRect`.
     ///
     /// The window is only ever as large as the thing it draws, so a transparent
     /// region that swallows clicks meant for other apps cannot exist.
@@ -277,9 +291,20 @@ public enum NotchGeometryResolver {
             ? CGRect(x: notchX, y: bandY, width: notchW, height: bandHeight)
             : CGRect(x: pillHotRect.minX, y: bandY, width: 0, height: bandHeight)
 
+        // Mirrors the pill's gap-then-rounded-end on the OTHER side of the
+        // notch, but with no content: purely so the shape has a corner to
+        // round in real screen pixels. Degenerate (zero width, pinned at
+        // `notchRect.minX`, same trick as `notchRect` above) when there's no
+        // notch or no room before the screen edge — never lets the window
+        // grow into negative room.
+        let leftCapRoom = max(0, notchRect.minX - f.minX - layout.pillGap)
+        let leftCapW = hasNotch ? min(layout.leftCapWidth, leftCapRoom) : 0
+        let leftCapX = leftCapW > 0 ? notchRect.minX - layout.pillGap - leftCapW : notchRect.minX
+        let leftCapRect = CGRect(x: leftCapX, y: bandY, width: leftCapW, height: bandHeight)
+
         // `CGRect.union` returns the non-empty operand when one side is empty,
         // which is exactly the non-notch behaviour we want.
-        let collapsedFrame = notchRect.union(pillHotRect)
+        let collapsedFrame = notchRect.union(pillHotRect).union(leftCapRect)
 
         // Expanded. The top-left origin is IDENTICAL to the collapsed frame's,
         // which is what lets the SwiftUI content sit in a `.topLeading` frame
@@ -311,6 +336,7 @@ public enum NotchGeometryResolver {
             notchRect: notchRect,
             pillRect: pillRect,
             pillHotRect: pillHotRect,
+            leftCapRect: leftCapRect,
             collapsedFrame: collapsedFrame,
             expandedFrame: expandedFrame,
             listHeight: listHeight,
@@ -338,8 +364,8 @@ extension NotchGeometryResolver {
     /// boundaries on Retina panels.
     public static let epsilon: CGFloat = 0.01
 
-    /// `collapsedFrame ⊆ (notchRect ∪ pillHotRect)` — asserted live on every
-    /// geometry change.
+    /// `collapsedFrame ⊆ (notchRect ∪ pillHotRect ∪ leftCapRect)` — asserted
+    /// live on every geometry change.
     ///
     /// The containment is trivially true because `collapsedFrame` is DERIVED as
     /// that union. That is the point: zero dead zone is structural. The rest of
@@ -360,12 +386,12 @@ extension NotchGeometryResolver {
                 && inner.minY >= outer.minY - eps && inner.maxY <= outer.maxY + eps
         }
 
-        let union = g.notchRect.union(g.pillHotRect)
+        let union = g.notchRect.union(g.pillHotRect).union(g.leftCapRect)
         if !eq(g.collapsedFrame, union) {
-            bad.append("collapsedFrame \(g.collapsedFrame) != notchRect ∪ pillHotRect \(union)")
+            bad.append("collapsedFrame \(g.collapsedFrame) != notchRect ∪ pillHotRect ∪ leftCapRect \(union)")
         }
         if !contains(union, g.collapsedFrame) {
-            bad.append("collapsedFrame escapes notchRect ∪ pillHotRect")
+            bad.append("collapsedFrame escapes notchRect ∪ pillHotRect ∪ leftCapRect")
         }
         if !contains(g.screenFrame, g.collapsedFrame) {
             bad.append("collapsedFrame \(g.collapsedFrame) escapes screenFrame \(g.screenFrame)")
@@ -402,12 +428,18 @@ extension NotchGeometryResolver {
             if g.notchRect.intersects(g.pillRect) {
                 bad.append("pillRect intersects notchRect — an invisible click target")
             }
+            if g.notchRect.intersects(g.leftCapRect) {
+                bad.append("leftCapRect intersects notchRect")
+            }
         } else {
             if g.notchRect.width != 0 {
                 bad.append("no notch but notchRect.width == \(g.notchRect.width)")
             }
             if !eq(g.notchRect.minX, g.pillHotRect.minX) {
                 bad.append("degenerate notchRect is not pinned at pillHotRect.minX")
+            }
+            if g.leftCapRect.width != 0 {
+                bad.append("no notch but leftCapRect.width == \(g.leftCapRect.width)")
             }
         }
         return GeometryInvariantReport(violations: bad)
@@ -455,6 +487,7 @@ extension NotchGeometry: CustomStringConvertible {
             display \(displayID)  hasNotch=\(hasNotch)  bandHeight=\(String(format: "%.1f", bandHeight))
             \(r("screenFrame", screenFrame))
             \(r("notchRect", notchRect))
+            \(r("leftCapRect", leftCapRect))
             \(r("pillRect", pillRect))
             \(r("pillHotRect", pillHotRect))
             \(r("collapsedFrame", collapsedFrame))

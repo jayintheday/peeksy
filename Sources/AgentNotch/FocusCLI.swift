@@ -303,7 +303,7 @@ enum FocusCLI {
 
             let report = NotchGeometryResolver.check(resolved)
             if report.isSatisfied {
-                print("  invariant       OK (collapsedFrame == notchRect ∪ pillHotRect)")
+                print("  invariant       OK (collapsedFrame == notchRect ∪ pillHotRect ∪ leftCapRect)")
             } else {
                 ok = false
                 print("  invariant       FAILED")
