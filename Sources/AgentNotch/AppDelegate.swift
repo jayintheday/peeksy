@@ -60,7 +60,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // right here and nowhere else; downstream of this hop the whole model is
         // main-actor confined and needs no locks.
         let counts = store.sessionCounts
+        // `open … --args --capture <path>` is the only reliable way to switch
+        // this on for a bundled app: `open` does not pass the shell's env.
+        let capture = EventCapture.resolve()
+        if let capture {
+            uiLog.info("capturing raw hook payloads to \(capture.url.path, privacy: .public)")
+        }
         let router = EventRouter(
+            capture: capture,
             deliver: { envelope in
                 Task { @MainActor in store.ingest(envelope) }
             },

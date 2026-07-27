@@ -37,6 +37,9 @@ enum FocusCLI {
         if let code = InstallCLI.run(arguments) {
             return code
         }
+        if arguments.contains("--capture-report") {
+            return captureReport(arguments)
+        }
         if arguments.contains("--doctor") {
             return doctor()
         }
@@ -198,6 +201,35 @@ enum FocusCLI {
         }
 
         return blocked ? 1 : 0
+    }
+
+    // MARK: - --capture-report
+
+    /// Summarise a capture file. Read-only, and it never touches the daemon.
+    private static func captureReport(_ arguments: [String]) -> Int32 {
+        let index = arguments.firstIndex(of: "--capture-report")!
+        let explicit = index + 1 < arguments.count && !arguments[index + 1].hasPrefix("--")
+            ? arguments[index + 1] : nil
+        guard let url = explicit.map({ URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) })
+            ?? EventCapture.resolve(arguments: [], env: ProcessInfo.processInfo.environment)?.url
+        else {
+            printErr("usage: AgentNotch --capture-report <path>")
+            printErr("   or: set $AGENT_NOTCH_CAPTURE and omit the path")
+            return 2
+        }
+
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            printErr("cannot read \(url.path)")
+            printErr("")
+            printErr("Start the app with capture on first:")
+            printErr("  open dist/AgentNotch.app --args --capture \(url.path)")
+            return 1
+        }
+
+        print("capture: \(url.path)")
+        print("")
+        print(CaptureReport.parse(text).description)
+        return 0
     }
 
     // MARK: - Owner inspection

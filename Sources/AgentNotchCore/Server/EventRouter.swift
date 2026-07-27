@@ -30,17 +30,21 @@ public struct EventRouter: Sendable {
     private let deliver: Deliver
     private let sessionCount: SessionCount
     private let adapterLookup: AdapterLookup
+    /// Off unless switched on. See `EventCapture`.
+    private let capture: EventCapture?
 
     public init(
         clock: @escaping @Sendable () -> Date = { Date() },
         pid: Int32 = ProcessInfo.processInfo.processIdentifier,
         adapterLookup: @escaping AdapterLookup = { AgentRegistry.adapter(forPathComponent: $0) },
+        capture: EventCapture? = nil,
         deliver: @escaping Deliver,
         sessionCount: @escaping SessionCount
     ) {
         self.clock = clock
         self.pid = pid
         self.adapterLookup = adapterLookup
+        self.capture = capture
         self.deliver = deliver
         self.sessionCount = sessionCount
     }
@@ -78,6 +82,11 @@ public struct EventRouter: Sendable {
     // MARK: - Private
 
     private func ingest(sourceComponent: String, body: Data) {
+        // FIRST, before anything can reject it. An event we drop — unknown
+        // source, no session_id, malformed JSON — is the most interesting kind
+        // of event to a capture, and the only place its shape is visible.
+        capture?.record(source: sourceComponent, body: body, at: clock())
+
         guard let adapter = adapterLookup(sourceComponent) else {
             Log.ingest.error("dropped event: unknown source '\(sourceComponent, privacy: .public)'")
             return
