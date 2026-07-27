@@ -17,6 +17,8 @@ BINARY="AgentNotch"
 DIST="dist"
 APP="$DIST/$APP_NAME.app"
 HOOK_SRC="hooks/agent-notch-hook.sh"
+ICON_SRC="assets/AppIcon.png"
+ICON="AppIcon.icns"
 
 INSTALL=0
 for arg in "$@"; do
@@ -41,10 +43,18 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN_DIR/$BINARY" "$APP/Contents/MacOS/$APP_NAME"
 
-if [ -f "AppIcon.icns" ]; then
-    cp "AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# The .icns is generated, not committed — assets/AppIcon.png is the source of
+# truth, so a fresh clone builds an icon without any design tools. Regenerate
+# whenever the source is newer, or the icon silently stays one design behind.
+if [ -f "$ICON_SRC" ] && { [ ! -f "$ICON" ] || [ "$ICON_SRC" -nt "$ICON" ]; }; then
+    scripts/make_icon.sh "$ICON_SRC"
+fi
+
+if [ -f "$ICON" ]; then
+    cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
+    echo "    bundled $ICON"
 else
-    echo "    note: AppIcon.icns not found — bundling without an icon"
+    echo "    note: $ICON not found — bundling without an icon"
 fi
 
 # The hook lives inside the bundle so `claude` invokes a stable path that picks
