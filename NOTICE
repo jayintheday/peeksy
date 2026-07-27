@@ -33,3 +33,55 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+thinking-orbs — https://github.com/Jakubantalik/thinking-orbs
+================================================================================
+
+Sources/AgentNotchCore/Orb/OrbDot.swift, OrbMath.swift, OrbProfile.swift and
+OrbitsMode.swift are a port of thinking-orbs' src/engine/core.ts and
+src/engine/orbits.ts, with the tuning from src/engine/profiles.ts and
+src/presets.ts. The rendering in Sources/AgentNotch/Views/OrbCanvas.swift
+follows that project's `paint`.
+
+Upstream is TypeScript rendering to an HTML5 canvas; this is a Swift port to
+SwiftUI's Canvas, not a bundled copy. Only the `orbits` mode is ported — the
+lattice, ribbon and morph modes, and the `fibDir`/`angleDelta` helpers that
+serve them, are not.
+
+Four deliberate deviations, all documented at their call sites:
+
+  1. Angular rates are quantised onto a 1/8 rad lattice (upstream: yaw 0.12
+     and per-orbit 0.25 + 0.55h). Upstream is driven by performance.now(), a
+     clock that only counts up and so never has to close a loop; this port is
+     driven by a repeatForever phase ramp that must. The quantisation gives
+     the system a period of exactly 16π and makes the wrap seamless.
+  2. Colour. Upstream is strictly monochrome and carries depth in a grey
+     level; here the ink value modulates a per-state tint instead, because in
+     this app colour is what carries state.
+  3. The six-mode preset machinery is replaced by one baked profile. The
+     derivation from upstream's base profile and `size: 20` preset is written
+     out in OrbProfile.swift.
+  4. `Dot.white` is renamed to `OrbDot.ink`.
+
+MIT License
+
+Copyright (c) 2026 Jakub Antalik
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
