@@ -81,6 +81,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let router = EventRouter(
             capture: capture,
+            // So `curl /v1/health` identifies the RUNNING daemon down to the
+            // commit — the question `open` makes easy to get wrong, since it
+            // activates an already-running instance instead of launching a
+            // freshly built one.
+            version: AppBuild.info.short,
             deliver: { envelope in
                 Task { @MainActor in store.ingest(envelope) }
             },

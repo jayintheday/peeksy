@@ -143,6 +143,16 @@ enum FocusCLI {
         print("AgentNotch doctor")
         print("")
 
+        // FIRST, before anything else it might explain. Every other line here
+        // describes a binary, and "which binary?" is the question that has to be
+        // settled before any of the answers mean anything.
+        print("build:            \(AppBuild.info.summary)")
+        print("bundle:           \(Bundle.main.bundlePath)")
+        if AppBuild.info.dirty {
+            print("                  ⚠︎ built over uncommitted changes")
+        }
+        print("")
+
         // 1. Socket. Recomputed inline rather than importing SocketPath so this
         //    file stays decoupled from the ingest side of the app; the rule below
         //    must stay identical to it.

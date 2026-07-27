@@ -28,6 +28,19 @@ for arg in "$@"; do
     esac
 done
 
+# Which build is this? CFBundleShortVersionString answers a different question
+# — the release name — and cannot distinguish this build from one three weeks
+# ago. `rev-parse` is used rather than `describe` because it is the one that
+# still works in CI's shallow checkout, and every command is guarded so a source
+# tarball with no .git builds perfectly well, just unstamped.
+GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || true)"
+if [ -n "$GIT_COMMIT" ] && ! git diff --quiet HEAD 2>/dev/null; then
+    GIT_DIRTY="true"
+else
+    GIT_DIRTY="false"
+fi
+BUILD_DATE="$(date '+%Y-%m-%d %H:%M')"
+
 echo "==> Building release binary"
 swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
@@ -84,6 +97,9 @@ cat > "$APP/Contents/Info.plist" << PLIST
     <key>CFBundleVersion</key><string>$VERSION</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>AgentNotchCommit</key><string>$GIT_COMMIT</string>
+    <key>AgentNotchDirty</key><string>$GIT_DIRTY</string>
+    <key>AgentNotchBuildDate</key><string>$BUILD_DATE</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHumanReadableCopyright</key><string>© 2026 Vijay Patel. Portions © 2026 Filip Sokolowski (MIT).</string>

@@ -9,7 +9,11 @@ import Foundation
 /// reporting failures and a user's coding session pays for our bug. Drops are
 /// visible in `os.Logger` and nowhere else.
 public struct EventRouter: Sendable {
-    public static let version = "0.1.0"
+    /// What `/v1/health` reports when nobody injects anything — the release
+    /// name alone. The app injects `BuildInfo.short` instead, so a running
+    /// daemon can be identified down to the commit; tests keep this stable
+    /// default so they never depend on which commit they happen to run at.
+    public static let defaultVersion = BuildInfo.fallbackVersion
 
     /// Hand a normalised envelope to the owner of the registry.
     public typealias Deliver = @Sendable (HookEnvelope) -> Void
@@ -27,6 +31,7 @@ public struct EventRouter: Sendable {
 
     private let clock: @Sendable () -> Date
     private let pid: Int32
+    private let version: String
     private let deliver: Deliver
     private let sessionCount: SessionCount
     private let adapterLookup: AdapterLookup
@@ -38,11 +43,13 @@ public struct EventRouter: Sendable {
         pid: Int32 = ProcessInfo.processInfo.processIdentifier,
         adapterLookup: @escaping AdapterLookup = { AgentRegistry.adapter(forPathComponent: $0) },
         capture: EventCapture? = nil,
+        version: String = EventRouter.defaultVersion,
         deliver: @escaping Deliver,
         sessionCount: @escaping SessionCount
     ) {
         self.clock = clock
         self.pid = pid
+        self.version = version
         self.adapterLookup = adapterLookup
         self.capture = capture
         self.deliver = deliver
@@ -62,7 +69,7 @@ public struct EventRouter: Sendable {
         if request.method == "GET", request.path == "/v1/health" {
             // Hand-built rather than JSONEncoder: four scalars, and a fixed key
             // order makes the response byte-comparable in tests.
-            let json = #"{"ok":true,"version":"\#(Self.version)","sessions":\#(sessionCount()),"pid":\#(pid)}"#
+            let json = #"{"ok":true,"version":"\#(version)","sessions":\#(sessionCount()),"pid":\#(pid)}"#
             return Self.response(
                 status: 200,
                 reason: "OK",
