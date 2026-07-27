@@ -22,7 +22,18 @@ public enum ProcessScan {
     ///
     /// `comm` can contain spaces (`Claude Helper (Renderer)`), so only the first
     /// three fields are split; everything after them is the command.
-    public static func parsePS(_ text: String, names: Set<String>) -> [DiscoveredProcess] {
+    ///
+    /// `requireTerminal: false` relaxes the second rule ONLY — the basename rule
+    /// still holds — and exists for `--doctor`. Seeding must never use it: a row
+    /// with no tty and no hook behind it carries no state, which is the whole
+    /// reason the rule is there. Diagnosis is the opposite job, and an agent the
+    /// scan deliberately ignores is precisely the one you need to see when a row
+    /// misbehaves.
+    public static func parsePS(
+        _ text: String,
+        names: Set<String>,
+        requireTerminal: Bool = true
+    ) -> [DiscoveredProcess] {
         var found: [DiscoveredProcess] = []
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             let trimmed = line.drop { $0 == " " }
@@ -30,8 +41,9 @@ public enum ProcessScan {
             guard fields.count == 4 else { continue }
 
             guard let pid = Int32(fields[0]) else { continue }
-            let tty = String(fields[2])
-            guard isTerminalTTY(tty) else { continue }
+            let raw = String(fields[2])
+            let tty = isTerminalTTY(raw) ? raw : nil
+            guard tty != nil || !requireTerminal else { continue }
 
             let comm = String(fields[3]).trimmingCharacters(in: .whitespaces)
             guard names.contains(basename(comm)) else { continue }

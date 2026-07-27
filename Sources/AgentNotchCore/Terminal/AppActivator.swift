@@ -19,11 +19,31 @@ public struct OwningApp: Sendable, Equatable {
     /// What the row shows, e.g. `"Claude"`. Never empty — the resolver
     /// substitutes something usable when AppKit has no localized name.
     public let localizedName: String
+    /// Whether this is an application a human would say they are *using*: one
+    /// with a Dock tile and a place in ⌘-Tab.
+    ///
+    /// False for the helper processes Electron apps spawn. Those are real
+    /// `NSRunningApplication`s — Cursor's extension host resolves with
+    /// `bundleID: "com.github.Electron.helper"` and a `localizedName` of
+    /// `"Cursor Helper (Plugin): extension-host (retrieval) …"` — but their
+    /// bundle lives inside `Cursor.app/Contents/Frameworks`, so LaunchServices
+    /// refuses to open it and the user gets a Finder alert reading *"The
+    /// application "Cursor Helper (Plugin)" is not open anymore."*
+    ///
+    /// So this is not cosmetic: an owner that is not user-facing is one we can
+    /// neither name usefully nor raise.
+    public let isUserFacing: Bool
 
-    public init(pid: Int32, bundleID: String? = nil, localizedName: String) {
+    public init(
+        pid: Int32,
+        bundleID: String? = nil,
+        localizedName: String,
+        isUserFacing: Bool = true
+    ) {
         self.pid = pid
         self.bundleID = bundleID
         self.localizedName = localizedName
+        self.isUserFacing = isUserFacing
     }
 }
 
@@ -67,9 +87,10 @@ public struct SystemAppActivator: AppActivating {
     ///
     /// Bounded because the chain is attacker-free but not shape-free: a pid can
     /// be reparented to `launchd` mid-walk, and a sysctl race can hand back a
-    /// parent that points back down. Five hops covers
-    /// `claude` → `node` → helper → `Claude.app` with room to spare, and the
-    /// `seen` set makes a cycle terminate rather than spin.
+    /// parent that points back down. Five hops covers the two real shapes with
+    /// room to spare — `claude` → `disclaimer` → `Claude.app`, and
+    /// `claude` → `zsh` → `Cursor Helper: terminal pty-host` → `Cursor` — and
+    /// the `seen` set makes a cycle terminate rather than spin.
     public static let maxHops = 5
 
     private let resolve: Resolve
@@ -86,19 +107,30 @@ public struct SystemAppActivator: AppActivating {
         self.activate = activate
     }
 
-    /// The application owning `pid`, or `nil`.
+    /// The nearest USER-FACING application owning `pid`, or `nil`.
     ///
     /// Pure with respect to the injected seams, and side-effect free — the row
     /// label calls this without activating anything.
+    ///
+    /// "User-facing" is load-bearing, not a nicety. An agent started from
+    /// Cursor's (or VS Code's) agent panel is a child of an Electron *helper*
+    /// process, and a helper resolves to a perfectly real `NSRunningApplication`
+    /// — so a walk that stopped at the first thing that resolved stopped there,
+    /// labelled the row `Cursor Helper (Plugin): extension-host …`, and on click
+    /// asked LaunchServices to open a bundle buried in `Contents/Frameworks`,
+    /// which put a Finder alert on screen. Helpers are skipped and the walk
+    /// continues to the app that owns them — Cursor, one hop up.
     public func owner(ofPid pid: Int32) -> OwningApp? {
         var current = pid
         var seen = Set<Int32>()
 
-        // maxHops PARENT traversals, so maxHops + 1 resolution attempts.
+        // maxHops PARENT traversals, so maxHops + 1 resolution attempts. A
+        // skipped helper spends a hop like any other link: the bound is on the
+        // walk, not on the number of candidates rejected.
         for _ in 0...Self.maxHops {
             // pid 1 is launchd; there is nothing above it and nothing to raise.
             guard current > 1, seen.insert(current).inserted else { return nil }
-            if let app = resolve(current) { return app }
+            if let app = resolve(current), app.isUserFacing { return app }
             guard let parent = parentOf(current) else { return nil }
             current = parent
         }

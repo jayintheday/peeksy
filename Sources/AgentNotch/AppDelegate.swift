@@ -177,14 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `isTerminalRunning`.
     private static func makeActivator() -> SystemAppActivator {
         SystemAppActivator(
-            resolve: { pid in
-                guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
-                return OwningApp(
-                    pid: pid,
-                    bundleID: app.bundleIdentifier,
-                    localizedName: app.localizedName ?? app.bundleIdentifier ?? "pid \(pid)"
-                )
-            },
+            resolve: systemOwnerResolve,
             activate: { owner in
                 guard let app = NSRunningApplication(processIdentifier: owner.pid) else { return false }
 

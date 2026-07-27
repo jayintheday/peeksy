@@ -25,9 +25,15 @@ public struct ProcessScanner: Sendable {
 
     /// Every live agent process with a real terminal, with its cwd where we
     /// could get one. Blocking — call it off the main thread.
-    public func scan(names: Set<String> = ClaudeCodeAdapter.processNames) -> [DiscoveredProcess] {
+    ///
+    /// `requireTerminal: false` widens it to tty-less agents for `--doctor`; see
+    /// `ProcessScan.parsePS`. Nothing that seeds the registry may pass it.
+    public func scan(
+        names: Set<String> = ClaudeCodeAdapter.processNames,
+        requireTerminal: Bool = true
+    ) -> [DiscoveredProcess] {
         guard let listing = run("/bin/ps", ["-Ao", "pid=,ppid=,tty=,comm="]) else { return [] }
-        let processes = ProcessScan.parsePS(listing, names: names)
+        let processes = ProcessScan.parsePS(listing, names: names, requireTerminal: requireTerminal)
         guard !processes.isEmpty else { return [] }
 
         // ONE lsof for all of them. Measured at ~26 ms for two pids; per-process

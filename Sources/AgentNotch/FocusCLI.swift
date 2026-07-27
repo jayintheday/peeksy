@@ -130,31 +130,29 @@ enum FocusCLI {
         //    This used to match "claude" anywhere in `args` and listed seventeen
         //    Claude.app helper processes; `ProcessScan` is the same filter the
         //    app actually seeds from, so the two can never disagree.
-        let sessions = ProcessScanner().scan()
+        let all = ProcessScanner().scan(requireTerminal: false)
+        let sessions = all.filter { $0.tty != nil }
         if sessions.isEmpty {
             print("claude processes: none with a terminal")
         } else {
             print("claude processes:")
-            let activator = inspectionActivator()
-            for session in sessions {
-                let tty = session.tty ?? "(no tty)"
-                let cwd = session.cwd ?? "(cwd unknown)"
-                print("  pid \(session.pid)  tty \(tty)  \(cwd)")
-                // WHAT A CLICK WOULD DO, spelled out. A session in an IDE's
-                // integrated terminal has a real tty that Terminal.app cannot
-                // script, and without this line the difference between "focuses
-                // the tab" and "raises the IDE" is invisible until you click.
-                let owner = activator.owner(ofPid: session.pid)
-                let route = focusRoute(
-                    tty: session.tty,
-                    pid: session.pid,
-                    ownerBundleID: { _ in owner?.bundleID })
-                print("       owned by \(owner?.localizedName ?? "(no application)")"
-                    + "  \(owner?.bundleID ?? "")")
-                print("       click →  \(describe(route))")
-            }
+            report(sessions)
         }
         print("")
+
+        // 3b. The same processes the scan REFUSES to seed — no controlling tty,
+        //     so they can only ever reach the app through a hook. Claude.app's
+        //     embedded agent and anything launched from an IDE's agent panel
+        //     land here, and until this section existed they were invisible to
+        //     every diagnostic: the first evidence of a broken owner lookup was
+        //     a bad row label and a Finder alert on click.
+        let ttyless = all.filter { $0.tty == nil }
+        if !ttyless.isEmpty {
+            print("claude processes without a terminal:")
+            print("                  (hook-only — never seeded from `ps`)")
+            report(ttyless)
+            print("")
+        }
 
         // 4. Automation probe. Skipped when Terminal is not running — probing
         //    would launch it, which is precisely what this app must never do.
@@ -240,16 +238,30 @@ enum FocusCLI {
     /// happen. The `activate` seam is stubbed to `false` so a diagnostic can
     /// never yank the user's frontmost app out from under them.
     private static func inspectionActivator() -> SystemAppActivator {
-        SystemAppActivator(
-            resolve: { pid in
-                guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
-                return OwningApp(
-                    pid: pid,
-                    bundleID: app.bundleIdentifier,
-                    localizedName: app.localizedName ?? app.bundleIdentifier ?? "pid \(pid)")
-            },
-            activate: { _ in false }
-        )
+        SystemAppActivator(resolve: systemOwnerResolve, activate: { _ in false })
+    }
+
+    /// One block per process: identity, owner, and WHAT A CLICK WOULD DO.
+    ///
+    /// The last line is the one that earns its keep. A session in an IDE's
+    /// integrated terminal has a real tty that Terminal.app cannot script, and
+    /// without spelling the decision out, the difference between "focuses the
+    /// tab" and "raises the IDE" is invisible until you click.
+    private static func report(_ processes: [DiscoveredProcess]) {
+        let activator = inspectionActivator()
+        for process in processes {
+            let tty = process.tty ?? "(none)"
+            let cwd = process.cwd ?? "(cwd unknown)"
+            print("  pid \(process.pid)  tty \(tty)  \(cwd)")
+            let owner = activator.owner(ofPid: process.pid)
+            let route = focusRoute(
+                tty: process.tty,
+                pid: process.pid,
+                ownerBundleID: { _ in owner?.bundleID })
+            print("       owned by \(owner?.localizedName ?? "(no application)")"
+                + "  \(owner?.bundleID ?? "")")
+            print("       click →  \(describe(route))")
+        }
     }
 
     private static func describe(_ route: FocusRoute) -> String {

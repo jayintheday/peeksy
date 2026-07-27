@@ -5,15 +5,25 @@ import Testing
 // MARK: - Fakes
 
 /// A fake process tree: `parents[child] = parent`, `apps[pid] = the app that pid is`.
+///
+/// `helpers` marks pids that resolve to an application AppKit will happily hand
+/// you and a human has never heard of — an Electron helper bundle. They are the
+/// difference between the real chain and the one this used to model.
 private struct FakeTree: Sendable {
     var parents: [Int32: Int32] = [:]
     var apps: [Int32: String] = [:]
+    var helpers: Set<Int32> = []
 
     var resolve: SystemAppActivator.Resolve {
         let apps = self.apps
+        let helpers = self.helpers
         return { pid in
             guard let name = apps[pid] else { return nil }
-            return OwningApp(pid: pid, bundleID: "com.example.\(name.lowercased())", localizedName: name)
+            return OwningApp(
+                pid: pid,
+                bundleID: "com.example.\(name.lowercased())",
+                localizedName: name,
+                isUserFacing: !helpers.contains(pid))
         }
     }
 
@@ -97,13 +107,75 @@ struct SystemAppActivatorOwnerTests {
         #expect(owner?.pid == 900)
     }
 
-    @Test("the nearest application in the chain wins, not the outermost")
+    @Test("the nearest USER-FACING application wins, not the outermost")
     func nearestAncestorWins() {
         let tree = FakeTree(
             parents: [10: 20, 20: 30],
-            apps: [20: "Helper", 30: "Outer"]
+            apps: [20: "Inner", 30: "Outer"]
         )
-        #expect(activator(tree).owner(ofPid: 10)?.localizedName == "Helper")
+        #expect(activator(tree).owner(ofPid: 10)?.localizedName == "Inner")
+    }
+
+    @Test("the Cursor shape: an Electron helper is skipped for the app above it")
+    func skipsElectronHelper() {
+        // The observed real chain. `Cursor Helper (Plugin): extension-host …` is
+        // a genuine NSRunningApplication — .accessory, bundle ID
+        // com.github.Electron.helper, bundle inside Cursor.app/Contents/
+        // Frameworks. Stopping there labelled the row with that whole string and
+        // asked LaunchServices to open a bundle it will not open, which is what
+        // put "The application "Cursor Helper (Plugin)" is not open anymore." on
+        // the user's screen.
+        let tree = FakeTree(
+            parents: [90210: 74989, 74989: 74532],
+            apps: [74989: "Cursor Helper (Plugin): extension-host (retrieval)", 74532: "Cursor"],
+            helpers: [74989]
+        )
+        let owner = activator(tree).owner(ofPid: 90210)
+        #expect(owner?.localizedName == "Cursor")
+        #expect(owner?.pid == 74532)
+    }
+
+    @Test("nested helpers are skipped all the way up, not just one deep")
+    func skipsSeveralHelpers() {
+        // Cursor's extension hosts fork further helpers of their own.
+        let tree = FakeTree(
+            parents: [10: 20, 20: 30, 30: 40],
+            apps: [20: "Helper (Renderer)", 30: "Helper (Plugin)", 40: "Cursor"],
+            helpers: [20, 30]
+        )
+        #expect(activator(tree).owner(ofPid: 10)?.localizedName == "Cursor")
+    }
+
+    @Test("a chain of nothing but helpers has no owner — better than a bad one")
+    func helpersOnlyIsNoOwner() {
+        // Returning the helper would activate a bundle LaunchServices refuses to
+        // open, and the failure is a system alert the user cannot act on. No
+        // owner means the click does nothing, silently, which is the honest
+        // outcome; a tty-backed row keeps its tty (see focusRoute's nil case).
+        let tree = FakeTree(
+            parents: [10: 20, 20: 30],
+            apps: [20: "Helper (GPU)", 30: "Helper (Renderer)"],
+            helpers: [20, 30]
+        )
+        #expect(activator(tree).owner(ofPid: 10) == nil)
+    }
+
+    @Test("a skipped helper still spends a hop")
+    func helpersConsumeTheBound() {
+        // The bound is on the WALK. If skipping were free, a pathological chain
+        // of helpers would climb forever and the `seen` set would be the only
+        // thing stopping it.
+        var parents: [Int32: Int32] = [:]
+        var apps: [Int32: String] = [:]
+        var helpers: Set<Int32> = []
+        for pid in Int32(10)...Int32(109) {
+            parents[pid] = pid + 1
+            apps[pid] = "Helper \(pid)"
+            helpers.insert(pid)
+        }
+        apps[110] = "Faraway"
+        let tree = FakeTree(parents: parents, apps: apps, helpers: helpers)
+        #expect(activator(tree).owner(ofPid: 10) == nil)
     }
 
     @Test("a chain with no application anywhere is noOwner, not a crash")
@@ -175,6 +247,16 @@ struct SystemAppActivatorActivateTests {
     @Test("no owner means nothing is activated at all")
     func noOwnerActivatesNothing() {
         let tree = FakeTree(parents: [:], apps: [:])
+        let spy = Spy()
+        #expect(activator(tree, activate: spy.activate).activateOwner(ofPid: 10) == .noOwner)
+        #expect(spy.calls.isEmpty)
+    }
+
+    @Test("a helper is never handed to activate, even as a last resort")
+    func helperIsNeverActivated() {
+        // The Finder alert came from asking LaunchServices to open a helper
+        // bundle. Nothing below `owner` gets the chance to try.
+        let tree = FakeTree(parents: [10: 20], apps: [20: "Helper (Plugin)"], helpers: [20])
         let spy = Spy()
         #expect(activator(tree, activate: spy.activate).activateOwner(ofPid: 10) == .noOwner)
         #expect(spy.calls.isEmpty)

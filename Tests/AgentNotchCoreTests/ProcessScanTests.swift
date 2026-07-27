@@ -48,6 +48,32 @@ struct ProcessScanPSTests {
         #expect(!found.contains { $0.pid == 37255 })
     }
 
+    @Test("requireTerminal: false keeps the tty-less agents, with a nil tty")
+    func doctorModeKeepsTtylessAgents() {
+        // `--doctor` only. The embedded agent joins the two real sessions, and
+        // its tty comes through as nil rather than the string "??" — a caller
+        // must never be able to route on a sentinel.
+        let found = ProcessScan.parsePS(realPS, names: ["claude"], requireTerminal: false)
+        #expect(found.map(\.pid).sorted() == [5175, 37255, 47624])
+        #expect(found.first { $0.pid == 37255 }?.tty == nil)
+    }
+
+    @Test("requireTerminal: false relaxes the tty rule and NOT the name rule")
+    func doctorModeStillFiltersByName() {
+        // Sixteen Claude.app helpers are tty-less too. Widening the tty rule
+        // must not bring back the seventeen-row listing the basename rule exists
+        // to prevent.
+        let found = ProcessScan.parsePS(realPS, names: ["claude"], requireTerminal: false)
+        #expect(!found.contains { $0.pid == 27991 }) // Claude Helper (Plugin)
+        #expect(!found.contains { $0.pid == 27523 }) // Claude itself
+        #expect(!found.contains { $0.pid == 501 })   // opendirectoryd
+    }
+
+    @Test("the default is unchanged: seeding never sees a tty-less process")
+    func defaultStillRequiresATerminal() {
+        #expect(ProcessScan.parsePS(realPS, names: ["claude"]).map(\.pid).sorted() == [5175, 47624])
+    }
+
     @Test("a comm with spaces and parentheses does not derail the parse")
     func handlesSpacesInComm() {
         // Not selected here, but if the split were wrong these lines would throw
