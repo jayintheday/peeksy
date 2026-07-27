@@ -1,5 +1,10 @@
 .build/
 dist/
+
+# Local agent working notes — deliberately not shipped in the repo
+CLAUDE.md
+LEARNINGS.md
+
 *.icns
 .DS_Store
 .swiftpm/
