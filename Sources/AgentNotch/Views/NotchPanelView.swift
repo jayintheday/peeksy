@@ -82,6 +82,14 @@ struct NotchPanelView: View {
     @State private var now = Date()
     @State private var hovered: String?
     @State private var installHovered = false
+    /// The header's two faces. See `header` for why this may never cost height.
+    @State private var showSettings = false
+    @State private var settingsHovered: String?
+    /// Cached deliberately. `LoginItem.status` calls into `SMAppService` every
+    /// time it is read, and this `body` redraws once a second off `tick`.
+    /// Refreshed when the settings face is opened and after every toggle, which
+    /// are the only two moments it can have changed under us.
+    @State private var loginItem = LoginItem.Status.disabled
 
     /// Read the same way `PillView` reads it. Not `@Environment` and not
     /// observed: a computed read during `body`, which means toggling Reduce
@@ -129,15 +137,92 @@ struct NotchPanelView: View {
     /// there would be invisible and unclickable. Putting the header in the list
     /// container sidesteps the constraint entirely and gives it the panel's full
     /// width instead of the ~140 pt left over to the right of the pill.
+    ///
+    /// It also carries the app's only two controls that are not a session, and
+    /// it carries them by SWAPPING its own text rather than by growing: the
+    /// header already reserves `headerHeight` and already ends in a `Spacer`, so
+    /// a second face here is free.
+    ///
+    /// Free is the whole reason it is here. `NotchListMetrics.contentHeight` is
+    /// computed from STORE state before the view is ever laid out — that is what
+    /// makes the window a step function around the animation — so a disclosure
+    /// driven by view `@State` cannot be seen by it. A settings panel that added
+    /// rows would leave the window smaller than the content it draws, which is
+    /// the definition of tearing. Zero-height sidesteps the constraint instead
+    /// of fighting it.
     private var header: some View {
         HStack(spacing: 6) {
-            Text(headerText)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+            if showSettings {
+                settingsFace
+            } else {
+                Text(headerText)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
             Spacer(minLength: 0)
+            gearToggle
         }
         .padding(.horizontal, NotchListMetrics.horizontalPadding)
         .frame(height: NotchListMetrics.headerHeight, alignment: .leading)
+    }
+
+    private var gearToggle: some View {
+        Image(systemName: showSettings ? "xmark" : "gearshape")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.white.opacity(settingsHovered == "gear" ? 0.85 : 0.45))
+            // A 26pt-tall strip of the header, not a 10pt glyph: this is a
+            // pointer target on a panel that hangs beside a physical notch.
+            .frame(width: 20, height: NotchListMetrics.headerHeight)
+            .contentShape(Rectangle())
+            .onHover { settingsHovered = $0 ? "gear" : (settingsHovered == "gear" ? nil : settingsHovered) }
+            .onTapGesture {
+                if !showSettings { loginItem = LoginItem.status }
+                showSettings.toggle()
+            }
+    }
+
+    /// The header's second face: start with the machine, and stop.
+    private var settingsFace: some View {
+        HStack(spacing: 10) {
+            settingsControl(
+                id: "login",
+                text: loginItemText,
+                emphasised: loginItem == .enabled
+            ) {
+                loginItem = LoginItem.setEnabled(loginItem != .enabled)
+            }
+            settingsControl(id: "quit", text: "Quit", emphasised: false) {
+                // No teardown to do here first. `applicationWillTerminate` stops
+                // the notch, the reaper and the server — and the server unlinks
+                // the socket, which is what lets the hook go back to its
+                // zero-fork fast path on the very next event.
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    /// `requiresApproval` earns its own label. The registration DID land — the
+    /// user has "Allow in the background" off — so "Launch at login" with no
+    /// tick would be a lie, and re-registering would do nothing.
+    private var loginItemText: String {
+        switch loginItem {
+        case .enabled: return "✓ Launch at login"
+        case .requiresApproval: return "Allow in Settings"
+        case .disabled, .unknown: return "Launch at login"
+        }
+    }
+
+    private func settingsControl(
+        id: String, text: String, emphasised: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(
+                .white.opacity(settingsHovered == id ? 0.95 : (emphasised ? 0.75 : 0.55)))
+            .frame(height: NotchListMetrics.headerHeight)
+            .contentShape(Rectangle())
+            .onHover { settingsHovered = $0 ? id : (settingsHovered == id ? nil : settingsHovered) }
+            .onTapGesture(perform: action)
     }
 
     private var headerText: String {

@@ -60,7 +60,28 @@ enum FocusCLI {
         if arguments.contains("--notch-harness") {
             return MainActor.assumeIsolated { notchHarness() }
         }
+        if arguments.contains("--login-item") {
+            return loginItem()
+        }
         return nil
+    }
+
+    /// Report the launch-at-login state. **Read-only, deliberately.**
+    ///
+    /// Registering from here would be worse than useless: `SMAppService` keys
+    /// the login item on the bundle path it is called from, so a CLI run out of
+    /// `dist/` would register a bundle the next `build_app.sh` deletes. The
+    /// toggle stays in the panel, where the thing being registered is the thing
+    /// the user actually launched. This exists so the status is checkable
+    /// without clicking, which is otherwise the only way to see it.
+    private static func loginItem() -> Int32 {
+        print("bundle       \(Bundle.main.bundlePath)")
+        print("login item   \(LoginItem.status)")
+        if LoginItem.status == .requiresApproval {
+            print("             registered, but blocked in System Settings →")
+            print("             General → Login Items → Allow in the Background")
+        }
+        return 0
     }
 
     /// `--slice` is NOT handled by `run` — it does not exit, it selects a UI.
