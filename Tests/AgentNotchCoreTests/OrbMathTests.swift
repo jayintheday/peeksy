@@ -21,7 +21,7 @@ struct OrbMathTests {
     @Test("orbHash matches upstream hashD for every salt the orbits mode uses")
     func hashMatchesUpstream() {
         // (orbit index, salt) → expected, for the three salts and three orbits
-        // that `OrbProfile.row` actually evaluates.
+        // that `OrbitsProfile.row` actually evaluates.
         let expected: [(Double, Double, Double)] = [
             (0, 1.7, 0.934379186), (0, 5.2, 0.746898294), (0, 8.9, 0.317445183),
             (1, 1.7, 0.906186929), (1, 5.2, 0.964177068), (1, 8.9, 0.376906108),

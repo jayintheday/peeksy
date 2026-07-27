@@ -38,31 +38,39 @@ SOFTWARE.
 thinking-orbs — https://github.com/Jakubantalik/thinking-orbs
 ================================================================================
 
-Sources/AgentNotchCore/Orb/OrbDot.swift, OrbMath.swift, OrbProfile.swift and
-OrbitsMode.swift are a port of thinking-orbs' src/engine/core.ts and
-src/engine/orbits.ts, with the tuning from src/engine/profiles.ts and
+Sources/AgentNotchCore/Orb/OrbDot.swift, OrbMath.swift, OrbMode.swift,
+OrbitsProfile.swift, OrbitsMode.swift and GlobeMode.swift are a port of
+thinking-orbs' src/engine/core.ts, src/engine/orbits.ts and the drawGlobe half
+of src/engine/lattice.ts, with the tuning from src/engine/profiles.ts and
 src/presets.ts. The rendering in Sources/AgentNotch/Views/OrbCanvas.swift
 follows that project's `paint`.
 
 Upstream is TypeScript rendering to an HTML5 canvas; this is a Swift port to
-SwiftUI's Canvas, not a bundled copy. Only the `orbits` mode is ported — the
-lattice, ribbon and morph modes, and the `fibDir`/`angleDelta` helpers that
-serve them, are not.
+SwiftUI's Canvas, not a bundled copy. Two of the six modes are ported —
+`orbits` (upstream's "working") and `globe` (upstream's "searching"). The
+`rubik` and `wave` modes that share lattice.ts, the ribbon and morph modes,
+and the `fibDir` helper that serves them, are not. `globe` is the one that
+ships; `orbits` remains reachable from --orb-lab as the comparison that
+justifies the choice.
 
-Four deliberate deviations, all documented at their call sites:
+Five deliberate deviations, all documented at their call sites:
 
-  1. Angular rates are quantised onto a 1/8 rad lattice (upstream: yaw 0.12
-     and per-orbit 0.25 + 0.55h). Upstream is driven by performance.now(), a
-     clock that only counts up and so never has to close a loop; this port is
-     driven by a repeatForever phase ramp that must. The quantisation gives
-     the system a period of exactly 16π and makes the wrap seamless.
+  1. Angular rates are quantised onto a 1/8 rad lattice. Upstream: orbits yaw
+     0.12 and per-orbit 0.25 + 0.55h; globe tilt 0.35 and scan 5.702.
+     Upstream is driven by performance.now(), a clock that only counts up and
+     so never has to close a loop; this port is driven by a repeatForever
+     phase ramp that must. The quantisation gives every mode a period of
+     exactly 16π and makes the wrap seamless.
   2. Colour. Upstream is strictly monochrome and carries depth in a grey
      level; here the ink value modulates a per-state tint instead, because in
      this app colour is what carries state.
-  3. The six-mode preset machinery is replaced by one baked profile. The
-     derivation from upstream's base profile and `size: 20` preset is written
-     out in OrbProfile.swift.
+  3. The six-mode preset machinery is replaced by one baked profile per mode.
+     The derivation from upstream's base profile and `size: 20` preset is
+     written out in OrbitsProfile.swift and GlobeMode.swift.
   4. `Dot.white` is renamed to `OrbDot.ink`.
+  5. Dots are sorted by a total order (z, then x, then y) rather than by depth
+     alone. Upstream can rely on a stable Array.prototype.sort; Swift's sort is
+     not stable, and a globe frame is 54 dots with only 37 distinct depths.
 
 MIT License
 

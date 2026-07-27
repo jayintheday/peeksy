@@ -16,6 +16,7 @@ import SwiftUI
 /// day. This ticks only while it is on screen, and it dies with its layer.
 struct OrbCanvas: View, Animatable {
     var phase: Double
+    let mode: OrbMode
     let tint: Color
     let side: CGFloat
 
@@ -41,8 +42,9 @@ struct OrbCanvas: View, Animatable {
     /// the cost of the whole feature.
     private let palette: [Color]
 
-    init(phase: Double, tint: Color, side: CGFloat) {
+    init(phase: Double, mode: OrbMode, tint: Color, side: CGFloat) {
         self.phase = phase
+        self.mode = mode
         self.tint = tint
         self.side = side
         self.palette = (0..<Self.bucketCount).map { bucket in
@@ -56,12 +58,12 @@ struct OrbCanvas: View, Animatable {
             //
             // The obvious loop — `context.fill(Path(ellipseIn:), with: .color(…))`
             // per dot — costs ~5% of a core per orb, while the maths behind it
-            // costs 0.009%. Practically all of it is 39 `Path` allocations and
-            // 39 `Color` resolutions per frame. Bucketing collapses that to 8
-            // paths and 8 pre-resolved colours and is the difference between
-            // this shipping and not.
+            // costs 0.009%. Practically all of it is a `Path` allocation and a
+            // `Color` resolution per dot per frame — 39 of each for orbits, 54
+            // for globe. Bucketing collapses that to 8 paths and 8 pre-resolved
+            // colours and is the difference between this shipping and not.
             var paths = [Path](repeating: Path(), count: Self.bucketCount)
-            for dot in OrbitsMode.dots(side: Double(side), t: phase) {
+            for dot in mode.dots(side: Double(side), t: phase) {
                 // Upstream paints matte grey and mirrors the ink against the
                 // substrate. We only ever paint on literal #000, so the mirror
                 // folds into this one multiply — and the colour channel it frees
@@ -78,11 +80,16 @@ struct OrbCanvas: View, Animatable {
                         height: dot.r * 2
                     ))
             }
-            // Ascending bucket order also happens to BE the painter's order:
-            // opacity is monotonic in depth here (ghosts bottom out around 0.14,
-            // particles start around 0.7), so near dots still land on top. Core
-            // still sorts by z because that is the honest contract for a dot
-            // list — this renderer just gets the ordering for free.
+            // Bucketing REPLACES Core's painter order with an opacity order,
+            // and the two are not always the same.
+            //
+            // For `orbits` they coincide: opacity is monotonic in depth (ghosts
+            // bottom out around 0.14, particles start around 0.7), so near dots
+            // still land on top. For `globe` they do not — a far dot under the
+            // scan meridian outranks a nearer unscanned one, because the sweep
+            // multiplies alpha. That is acceptable and arguably right: the scan
+            // is the thing the eye should catch, and at 16pt these are sub-point
+            // dots with almost no overlap to occlude.
             for (bucket, path) in paths.enumerated() where !path.isEmpty {
                 context.fill(path, with: .color(palette[bucket]))
             }
@@ -100,14 +107,18 @@ struct OrbCanvas: View, Animatable {
 struct SessionOrb: View {
     let tint: RowTint
     let spinning: Bool
+    /// No default. Which orb this is, is a product decision, and the one place
+    /// it ships is worth reading at the call site.
+    let mode: OrbMode
     var side: CGFloat = 16
 
     var body: some View {
         Group {
             if spinning {
-                SpinningOrb(tint: tint.notchColour, side: side)
+                SpinningOrb(mode: mode, tint: tint.notchColour, side: side)
             } else {
-                OrbCanvas(phase: OrbitsMode.restPhase, tint: tint.notchColour, side: side)
+                OrbCanvas(
+                    phase: OrbitsMode.restPhase, mode: mode, tint: tint.notchColour, side: side)
             }
         }
         .frame(width: side, height: side)
@@ -127,26 +138,26 @@ struct SessionOrb: View {
 /// a cloud of sub-point dots with no landmark to jump against, and the swap
 /// always coincides with the row's tint crossfading to a new state anyway.
 private struct SpinningOrb: View {
+    let mode: OrbMode
     let tint: Color
     let side: CGFloat
 
     @State private var phase = OrbitsMode.restPhase
 
-    /// Wall-clock seconds for one revolution.
-    ///
-    /// `t` already carries the profile's speed — upstream multiplies its clock
-    /// by it before calling the mode — so the period in `t` divided by that
-    /// speed is the duration in seconds. ≈ 12.9 s.
-    private static let loop = OrbitsMode.period / OrbProfile.row.speed
-
     var body: some View {
-        OrbCanvas(phase: phase, tint: tint, side: side)
+        // Wall-clock seconds for one revolution. `t` already carries the mode's
+        // speed — upstream multiplies its clock by it before calling the mode —
+        // so the period in `t` divided by that speed is the duration in
+        // seconds: ≈12.9 s for orbits, ≈18.9 s for globe.
+        OrbCanvas(phase: phase, mode: mode, tint: tint, side: side)
             .onAppear {
                 // Ramping by exactly one period is what makes `repeatForever`
                 // seamless: `restPhase` and `restPhase + period` are the same
                 // picture, so the wrap is invisible. `OrbitsMode.quantum` is
                 // what buys that, and `OrbitsModeTests` is what keeps it.
-                withAnimation(.linear(duration: Self.loop).repeatForever(autoreverses: false)) {
+                withAnimation(
+                    .linear(duration: mode.loopDuration).repeatForever(autoreverses: false)
+                ) {
                     phase = OrbitsMode.restPhase + OrbitsMode.period
                 }
             }

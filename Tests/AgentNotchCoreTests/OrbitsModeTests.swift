@@ -18,7 +18,7 @@ struct OrbitsModeTests {
 
     @Test("a frame is exactly orbits × (ghosts + particles) dots")
     func dotCount() {
-        let p = OrbProfile.row
+        let p = OrbitsProfile.row
         #expect(dots(3.0).count == p.orbitCount * (p.ghostCount + p.particles))
         #expect(dots(3.0).count == 39)
     }
@@ -50,7 +50,7 @@ struct OrbitsModeTests {
     func dotsAreDrawable() {
         for t in [0.0, 0.6, 3.0] {
             for dot in dots(t) {
-                #expect(dot.r >= OrbProfile.row.minRadius)
+                #expect(dot.r >= OrbitsProfile.row.minRadius)
                 #expect(dot.alpha > 0.02, "upstream would have culled this dot")
                 #expect(dot.ink >= 0 && dot.ink <= 1)
             }
@@ -148,7 +148,7 @@ struct OrbitsModeTests {
         // upstream's 0.12 by someone diffing the two files.
         #expect(abs(OrbitsMode.yawRate.remainder(dividingBy: OrbitsMode.quantum)) < tolerance)
 
-        for orbit in 0..<OrbProfile.row.orbitCount {
+        for orbit in 0..<OrbitsProfile.row.orbitCount {
             let rate = OrbitsMode.quantise(0.25 + 0.55 * orbHash(Double(orbit), 8.9))
             #expect(abs(rate.remainder(dividingBy: OrbitsMode.quantum)) < tolerance)
             // Never zero: a stationary orbit reads as a rendering bug.

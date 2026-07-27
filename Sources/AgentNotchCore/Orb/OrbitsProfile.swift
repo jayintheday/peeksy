@@ -11,7 +11,7 @@ import Foundation
 ///
 /// The derivation is written out so a future reader can diff it against upstream
 /// without running any TypeScript. See `NOTICE`.
-public struct OrbProfile: Sendable, Equatable {
+public struct OrbitsProfile: Sendable, Equatable {
     /// Number of tilted orbit rings.
     public let orbitCount: Int
     /// Dots tracing each orbit's ghost path.
@@ -60,7 +60,7 @@ public struct OrbProfile: Sendable, Equatable {
     }
 }
 
-extension OrbProfile {
+extension OrbitsProfile {
     /// The session-row orb: upstream's `orbits` base profile with the `size: 20`
     /// preset baked in.
     ///
@@ -84,7 +84,7 @@ extension OrbProfile {
     /// explicit that its two sizes are "separate designs, not a scale factor",
     /// so 16pt is off the end of the tuned range and `orbRadiusScale` is doing
     /// the extrapolating. That is what `--orb-lab` exists to judge.
-    public static let row = OrbProfile(
+    public static let row = OrbitsProfile(
         orbitCount: 3,
         ghostCount: 10,
         particles: 3,

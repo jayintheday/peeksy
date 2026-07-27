@@ -58,7 +58,7 @@ public enum OrbitsMode {
     ///
     /// `side` is the orb's width in points; the caller's canvas must be square
     /// and this size, because the projection centres on `side/2`.
-    public static func dots(side: Double, t: Double, profile: OrbProfile = .row) -> [OrbDot] {
+    public static func dots(side: Double, t: Double, profile: OrbitsProfile = .row) -> [OrbDot] {
         guard side > 0 else { return [] }
 
         let centre = side / 2
@@ -173,8 +173,7 @@ public enum OrbitsMode {
         // ever gets that faint — ghosts bottom out at 0.2 and particles are
         // opaque — so porting the filter would have been dead code that made the
         // dot count untestable.
-        dots.sort { $0.z < $1.z }
-        return dots
+        return dots.sortedFarToNear()
     }
 
     /// The frame to show when the orb is at rest.
