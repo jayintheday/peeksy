@@ -9,10 +9,24 @@ import Foundation
 public enum AgentSource: String, Sendable, Codable, CaseIterable {
     case claudeCode = "claude-code"
 
+    /// A second agent that exists only so the seam can be exercised.
+    ///
+    /// Deliberately ABSENT from `AgentRegistry.all`, so `POST /v1/event/mock`
+    /// in the shipped app is inert: the router answers 204 and logs an unknown
+    /// source, exactly like any other unrecognised route. The test target
+    /// supplies its own adapter and its own lookup — see `MockAdapter`.
+    ///
+    /// It lives here rather than in the tests because `HookEnvelope.source` is
+    /// typed, and needing a case is item one of the compile-time checklist this
+    /// enum's whole design is a bet on. If adding an agent had required a change
+    /// to `Session`, `SessionRegistry` or a view, the bet would have been lost.
+    case mock
+
     /// Human-facing name. The raw value is the wire/route spelling.
     public var displayName: String {
         switch self {
         case .claudeCode: return "Claude Code"
+        case .mock: return "Mock Agent"
         }
     }
 }

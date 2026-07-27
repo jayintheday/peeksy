@@ -15,6 +15,13 @@ public struct EventRouter: Sendable {
     public typealias Deliver = @Sendable (HookEnvelope) -> Void
     /// Current session count, for `/v1/health`.
     public typealias SessionCount = @Sendable () -> Int
+    /// Resolve the `{source}` component of the route to an adapter.
+    ///
+    /// Injected so a test can register an agent the shipped app has never heard
+    /// of. That injection IS the seam test: if adding an agent needed anything
+    /// more than an `AgentSource` case and an adapter, this parameter would not
+    /// be enough and the design would be wrong.
+    public typealias AdapterLookup = @Sendable (String) -> (any AgentAdapter.Type)?
 
     private static let eventPrefix = "/v1/event/"
 
@@ -22,15 +29,18 @@ public struct EventRouter: Sendable {
     private let pid: Int32
     private let deliver: Deliver
     private let sessionCount: SessionCount
+    private let adapterLookup: AdapterLookup
 
     public init(
         clock: @escaping @Sendable () -> Date = { Date() },
         pid: Int32 = ProcessInfo.processInfo.processIdentifier,
+        adapterLookup: @escaping AdapterLookup = { AgentRegistry.adapter(forPathComponent: $0) },
         deliver: @escaping Deliver,
         sessionCount: @escaping SessionCount
     ) {
         self.clock = clock
         self.pid = pid
+        self.adapterLookup = adapterLookup
         self.deliver = deliver
         self.sessionCount = sessionCount
     }
@@ -68,7 +78,7 @@ public struct EventRouter: Sendable {
     // MARK: - Private
 
     private func ingest(sourceComponent: String, body: Data) {
-        guard let adapter = AgentRegistry.adapter(forPathComponent: sourceComponent) else {
+        guard let adapter = adapterLookup(sourceComponent) else {
             Log.ingest.error("dropped event: unknown source '\(sourceComponent, privacy: .public)'")
             return
         }
