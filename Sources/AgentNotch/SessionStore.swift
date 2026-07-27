@@ -65,6 +65,10 @@ enum HookProbe {
 @Observable
 final class SessionStore {
 
+    /// Called at the end of every reap tick. The notch uses it to re-measure the
+    /// menu bar without owning a timer; nothing else may assume an interval.
+    @ObservationIgnored var onHousekeeping: (() -> Void)?
+
     /// Snapshot of `registry.ordered()`. Recomputed at most every
     /// `coalesceInterval`, never per event.
     private(set) var rows: [Session] = []
@@ -245,6 +249,11 @@ final class SessionStore {
         hookInstalled = HookProbe.isInstalled()
         refreshTitles()
         publish()
+        // The notch hangs its menu-bar re-measurement off this tick rather than
+        // starting a timer of its own. This one already fires forever; a second
+        // repeating source in a 24/7 accessory app is a cost with no upside, and
+        // a 0.31 ms window-list scan every 15 s is free next to a reap.
+        onHousekeeping?()
     }
 
     // MARK: - Task titles

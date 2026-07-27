@@ -190,6 +190,63 @@ struct NotchGeometryTests {
         #expect(report.violations.contains { $0.contains("right of the drawn pill") })
     }
 
+    // MARK: - Yielded
+
+    @Test("with no pill the collapsed window is exactly the notch")
+    func yieldedCollapsesToTheNotch() {
+        let g = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14, listContentHeight: threeRows, pillContentWidth: 0)
+        #expect(!g.showsPill)
+        // The only pixels we occupy are ones the camera housing already owns, so
+        // covering somebody's status icon is impossible by construction.
+        #expect(g.collapsedFrame == g.notchRect)
+        #expect(g.collapsedFrame.maxX == g.notchRect.maxX)
+        #expect(NotchGeometryResolver.check(g).isSatisfied)
+    }
+
+    @Test("a yielded window offers nothing to click")
+    func yieldedHasNoInteractiveRects() {
+        let g = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14, listContentHeight: threeRows, pillContentWidth: 0)
+        // Not even the notch. A click target the user cannot see is the most
+        // confusing failure this app has.
+        for phase in NotchPhase.allCases {
+            #expect(g.interactiveRects(for: phase).isEmpty)
+        }
+    }
+
+    @Test("yielding gives back strictly more than the idle pill already did")
+    func yieldingBeatsShrinking() {
+        let idle = resolveNotched14(sessions: 0)
+        let yielded = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14, listContentHeight: threeRows, pillContentWidth: 0)
+        #expect(yielded.collapsedFrame.maxX < idle.collapsedFrame.maxX)
+    }
+
+    @Test("without a notch there is nothing to shrink to, so the pill is floored")
+    func yieldingIsMeaninglessWithoutANotch() {
+        // The collapsed window IS the pill there; removing it would leave an
+        // empty frame, and an empty frame is not a window. The resolver floors
+        // it and the controller orders out instead.
+        let g = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.external, listContentHeight: threeRows, pillContentWidth: 0)
+        #expect(g.showsPill)
+        #expect(!g.collapsedFrame.isEmpty)
+        #expect(NotchGeometryResolver.check(g).isSatisfied)
+    }
+
+    @Test("the invariant holds while yielded, on every notched fixture")
+    func yieldedInvariantHolds() {
+        for screen in [ScreenFixture.notched14, ScreenFixture.notched16] {
+            for content in [CGFloat(0), threeRows, 4000] {
+                let g = NotchGeometryResolver.resolve(
+                    screen: screen, listContentHeight: content, pillContentWidth: 0)
+                let report = NotchGeometryResolver.check(g)
+                #expect(report.isSatisfied, "display \(screen.displayID): \(report.violations)")
+            }
+        }
+    }
+
     private func resolveNotched14(sessions: Int) -> NotchGeometry {
         NotchGeometryResolver.resolve(
             screen: ScreenFixture.notched14,
@@ -442,6 +499,7 @@ struct NotchGeometryTests {
             pillRect: g.pillRect,
             pillContentRect: g.pillContentRect,
             pillHotRect: g.pillHotRect.insetBy(dx: 0, dy: -20),
+            showsPill: g.showsPill,
             leftCapRect: g.leftCapRect,
             collapsedFrame: g.collapsedFrame.insetBy(dx: 0, dy: -20),
             expandedFrame: g.expandedFrame,

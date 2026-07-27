@@ -481,17 +481,58 @@ enum FocusCLI {
         let threeRows = NotchListMetrics.headerHeight
             + 3 * NotchListMetrics.rowHeight
             + 2 * NotchListMetrics.separatorHeight
+        var edges: [String: CGFloat] = [:]
         for (label, sessions) in [("idle (0)", 0), ("busy (3)", 3)] {
             let g = NotchGeometryResolver.resolve(
                 screen: metrics,
                 listContentHeight: threeRows,
                 pillContentWidth: PillMetrics.contentWidth(sessionCount: sessions))
             let edge = g.collapsedFrame.maxX
+            edges[label] = edge
             let clearance = occupancy.clearance(rightOf: edge)
             let verdict = clearance.map { $0 >= 0 ? "clear by \(f($0)) pt" : "OVERLAPS by \(f(-$0)) pt" }
                 ?? "unknown"
+            var yield = NeighbourYield()
+            yield.apply(occupancy, fullFootprintMaxX: edge)
             print("  footprint \(label.padding(toLength: 9, withPad: " ", startingAt: 0))"
-                + "ends at \(f(edge))   \(verdict)")
+                + "ends at \(f(edge))   \(verdict)   → \(yield.level)")
+        }
+
+        // `--menubar --simulate 883` runs the real policy against a hypothetical
+        // run position: the decision ladder, exercised with no window, no scan
+        // and no risk.
+        if let index = arguments.firstIndex(of: "--simulate"),
+           index + 1 < arguments.count,
+           let hypothetical = Double(arguments[index + 1]) {
+            let runMinX = CGFloat(hypothetical)
+            let pretend = MenuBarOccupancy(
+                displayID: metrics.displayID,
+                statusRunMinX: runMinX,
+                items: [CGRect(x: runMinX, y: metrics.frame.maxY - bandHeight,
+                               width: 32, height: bandHeight)],
+                trust: .trusted)
+            print("  simulate        status run at x=\(f(runMinX))")
+            for label in ["idle (0)", "busy (3)"] {
+                guard let edge = edges[label] else { continue }
+                var yield = NeighbourYield()
+                yield.apply(pretend, fullFootprintMaxX: edge)
+                // And what it would take to come back, from yielded.
+                var returning = NeighbourYield()
+                returning.apply(
+                    MenuBarOccupancy(displayID: metrics.displayID, statusRunMinX: 0,
+                                     items: [], trust: .trusted),
+                    fullFootprintMaxX: edge)
+                var confirmations = 0
+                while returning.level == .yielded && confirmations < 8 {
+                    confirmations += 1
+                    if returning.apply(pretend, fullFootprintMaxX: edge) { break }
+                }
+                let back = returning.level == .full
+                    ? "would release after \(confirmations) sample(s)"
+                    : "would stay yielded"
+                print("    \(label.padding(toLength: 12, withPad: " ", startingAt: 0))"
+                    + "→ \(yield.level)   (from yielded: \(back))")
+            }
         }
 
         return occupancy.trust.isTrusted ? 0 : 1

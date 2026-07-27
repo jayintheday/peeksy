@@ -68,6 +68,10 @@ final class NotchController {
     private let store: SessionStore
     private let scanner = MenuBarScanner()
     private lazy var menuBar = MenuBarProbe(scanner: scanner)
+    /// Off switch, read once. If the window-list measurement ever goes wrong on
+    /// a macOS we have not seen, this restores the previous behaviour without a
+    /// rebuild.
+    private let yieldEnabled = ProcessInfo.processInfo.environment["AGENT_NOTCH_YIELD"] != "off"
     private let screens = ScreenMetricsReader()
     private let hover = HoverEngine()
     private let dismiss = DismissMonitor()
@@ -103,6 +107,11 @@ final class NotchController {
     private var visibilityTimer: Timer?
     /// Last width handed to the resolver, for change detection in `observeStore`.
     private var lastPillWidth: CGFloat?
+    /// Whether we are currently standing aside for somebody else's status icon.
+    private var yield = NeighbourYield()
+    /// True when yielding on this display means hiding rather than shrinking —
+    /// a display with no notch has no body to shrink to.
+    private var yieldMeansHide = false
 
     init(store: SessionStore) {
         self.store = store
@@ -144,6 +153,9 @@ final class NotchController {
         panel.orderFrontRegardless()
         system.start()
         observeStore()
+        // After `orderFrontRegardless`, because the calibration check wants our
+        // own window in the list, and before the first hover.
+        housekeepingTick()
         hover.burst()
     }
 
@@ -182,7 +194,12 @@ final class NotchController {
         panel.onCancel = { [weak self] in self?.collapse() }
         dismiss.onDismiss = { [weak self] in self?.collapse() }
 
-        system.onGeometryChanged = { [weak self] in self?.refreshGeometry() }
+        system.onGeometryChanged = { [weak self] in self?.housekeepingTick() }
+        // A new app's status item can push the run left into where the pill
+        // sits, and a quitting app's departure is how the room comes back.
+        system.onMenuBarPopulationChanged = { [weak self] in self?.housekeepingTick() }
+        // The reap tick, borrowed. See `SessionStore.onHousekeeping`.
+        store.onHousekeeping = { [weak self] in self?.housekeepingTick() }
         system.onWake = { [weak self] in
             self?.refreshGeometry()
             self?.hover.burst()
@@ -216,6 +233,11 @@ final class NotchController {
     /// narrower with nothing to count. Sitting on menu bar we are not drawing in
     /// is what covers other apps' status icons, so the frame tracks the content.
     private func currentPillWidth() -> CGFloat {
+        yield.pillContentWidth(wanting: wantedPillWidth())
+    }
+
+    /// The width the pill would like to be, before any yielding.
+    private func wantedPillWidth() -> CGFloat {
         PillMetrics.contentWidth(sessionCount: store.aggregate.count)
     }
 
@@ -256,7 +278,9 @@ final class NotchController {
         // ask the anchor separately, which was free; asking the window server
         // twice per refresh is not.
         let menuBarReading = menuBar.read()
-        setHidden(!menuBarReading.isPresent)
+        // Yielding on a display with no notch means hiding: there the collapsed
+        // window IS the pill, so there is nothing to shrink back to.
+        setHidden(!menuBarReading.isPresent || (yield.level == .yielded && yieldMeansHide))
         guard let fresh = computeGeometry(on: menuBarReading.screen),
               fresh != geometry
         else { return }
@@ -307,6 +331,56 @@ final class NotchController {
         }
     }
 
+    /// Re-measure the menu bar and, if the verdict changed, move the window.
+    ///
+    /// Deliberately NOT part of `refreshGeometry`. That runs on the hover path
+    /// via `open(as:)`, and a window-list scan is the kind of work the collapsed
+    /// state's whole design exists to keep out of it.
+    @discardableResult
+    func refreshYield() -> Bool {
+        guard yieldEnabled, let g = geometry else { return false }
+        let screen = menuBar.read().screen ?? NSScreen.main
+        guard let screen else { return false }
+        let metrics = screens.metrics(for: screen)
+        yieldMeansHide = !metrics.hasNotch
+
+        // What we would occupy if we were NOT yielding. Asking about the
+        // yielded footprint would be circular — it always fits, so we would
+        // never come back.
+        let atFull = NotchGeometryResolver.resolve(
+            screen: metrics,
+            listContentHeight: 0,
+            pillContentWidth: wantedPillWidth(),
+            layout: layout)
+
+        let occupancy = scanner.occupancy(
+            screen: metrics,
+            bandHeight: g.bandHeight,
+            // Our own panel, whose true frame we know, as live proof that the
+            // bounds and the y-flip both still mean what we think.
+            calibration: panel.map { (UInt32($0.windowNumber), $0.frame) })
+
+        let before = yield.level
+        guard yield.apply(occupancy, fullFootprintMaxX: atFull.collapsedFrame.maxX) else {
+            return false
+        }
+        uiLog.info("""
+            menu bar yield \(String(describing: before), privacy: .public) → \
+            \(String(describing: self.yield.level), privacy: .public) \
+            (run at \(occupancy.statusRunMinX ?? -1, privacy: .public), \
+            we would end at \(atFull.collapsedFrame.maxX, privacy: .public))
+            """)
+        return true
+    }
+
+    /// Re-measure, then re-resolve. Driven by `SessionStore`'s reap tick and by
+    /// the same system events that already move the window, so this adds no
+    /// timer and no idle wakeups of its own.
+    func housekeepingTick() {
+        refreshYield()
+        refreshGeometry()
+    }
+
     /// The ONLY way back from hidden.
     ///
     /// Every other call site for `refreshGeometry` is an event — a screen change,
@@ -318,7 +392,10 @@ final class NotchController {
     private func startVisibilityWatch() {
         guard visibilityTimer == nil else { return }
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshGeometry() }
+            // `housekeepingTick`, not `refreshGeometry`: on a display with no
+            // notch a yield IS the hide, so measuring is the only way back out
+            // of it.
+            MainActor.assumeIsolated { self?.housekeepingTick() }
         }
         timer.tolerance = 0.3
         RunLoop.main.add(timer, forMode: .common)
@@ -620,6 +697,7 @@ final class NotchController {
     var debugMenuBarRect: CGRect? { menuBar.read().rect }
     var debugMenuBarScreen: String? { menuBar.read().screen?.localizedName }
     var debugMenuBarInset: CGFloat? { menuBar.read().inset }
+    var debugYieldLevel: NotchYieldLevel { yield.level }
 
     // MARK: - Rect helpers
 

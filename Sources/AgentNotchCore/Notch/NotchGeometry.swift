@@ -194,6 +194,13 @@ public struct NotchGeometry: Sendable, Equatable {
     public let pillContentRect: CGRect
     /// `pillRect` widened by the two hover slops. Same height, same top edge.
     public let pillHotRect: CGRect
+    /// False in the YIELDED state: the collapsed window is the notch and nothing
+    /// else, because drawing the pill would cover somebody's status icon.
+    ///
+    /// `pillRect`, `pillContentRect` and `pillHotRect` are all degenerate then —
+    /// zero width, pinned at `notchRect.maxX` — so the union is exactly the
+    /// notch, and hardware-black pixels are the only ones we occupy.
+    public let showsPill: Bool
     /// A small decorative strip immediately left of `notchRect`, or a
     /// degenerate zero-width rect pinned at `notchRect.minX` when there is
     /// no room for it or no notch. Never in `interactiveRects` — it exists
@@ -242,6 +249,12 @@ public struct NotchGeometry: Sendable, Equatable {
     /// target of is nothing. Consequence for layout: no interactive chrome may
     /// sit in the band's notch x-range.
     public func interactiveRects(for phase: NotchPhase) -> [CGRect] {
+        guard showsPill else {
+            // Yielded: nothing is drawn outside the notch, so nothing outside it
+            // may be clicked. Offering the notch itself would be a click target
+            // the user cannot see, which is the one thing this app must not do.
+            return []
+        }
         switch phase {
         case .collapsed:
             return [pillRect]
@@ -297,14 +310,32 @@ public enum NotchGeometryResolver {
         // notch: the frontmost app's menus are always LEFT of the notch and
         // status items are right-aligned, so the first few points to the right
         // of the notch are the emptiest real estate in the menu bar.
+        // A width of zero means "draw no pill at all" — the yielded state, where
+        // the collapsed window shrinks to the notch and stops occupying menu bar
+        // that somebody else's status icon wants.
+        //
+        // That only makes sense where the notch already gives the window a body
+        // to be. On a display without one the collapsed window IS the pill, so
+        // removing it would leave an empty frame, and an empty frame is not a
+        // window — there the caller orders out instead (see
+        // `NotchController.applyYield`). Floored here so the geometry stays well
+        // formed either way rather than depending on the caller remembering.
+        let effectivePillWidth = pillContentWidth > 0
+            ? pillContentWidth
+            : (hasNotch ? 0 : PillMetrics.contentWidth(sessionCount: 0))
+        let showsPill = effectivePillWidth > 0
+
         // The slot is the drawn capsule plus padding, NOT a fixed constant. The
         // window paints this rect opaque black over the menu bar, so a slot
         // wider than its content is menu bar taken from other apps to show
         // nothing.
-        let pillW = min(pillContentWidth + 2 * layout.pillPadding, f.width)
+        let pillW = showsPill ? min(effectivePillWidth + 2 * layout.pillPadding, f.width) : 0
         var pillX: CGFloat
         if hasNotch {
-            pillX = notchX + notchW + layout.pillGap
+            // With no pill there is no gap to leave either: pinning the
+            // degenerate rect at the notch's own edge keeps the union exactly
+            // the notch and keeps `check`'s leading-slop guard meaningful.
+            pillX = notchX + notchW + (showsPill ? layout.pillGap : 0)
         } else {
             // No notch: hang the tab from the middle of the top edge, which is
             // the same place the notch would have been.
@@ -313,10 +344,12 @@ public enum NotchGeometryResolver {
         pillX = min(pillX, f.maxX - pillW - layout.hoverSlopTrailing)
         pillX = max(pillX, f.minX + layout.hoverSlopLeading)
         let pillRect = CGRect(x: pillX, y: bandY, width: pillW, height: bandHeight)
-        let pillContentRect = pillRect.insetBy(dx: layout.pillPadding, dy: 0)
+        let pillContentRect = pillRect.insetBy(dx: showsPill ? layout.pillPadding : 0, dy: 0)
 
-        var hotX = pillRect.minX - layout.hoverSlopLeading
-        var hotMaxX = pillRect.maxX + layout.hoverSlopTrailing
+        // Slop belongs to a target that exists. Around a degenerate pill it
+        // would re-inflate the very footprint the yield exists to give back.
+        var hotX = pillRect.minX - (showsPill ? layout.hoverSlopLeading : 0)
+        var hotMaxX = pillRect.maxX + (showsPill ? layout.hoverSlopTrailing : 0)
         hotX = max(hotX, f.minX)
         hotMaxX = min(hotMaxX, f.maxX)
         // Slop is horizontal only. A vertical expansion would drag the collapsed
@@ -377,6 +410,7 @@ public enum NotchGeometryResolver {
             pillRect: pillRect,
             pillContentRect: pillContentRect,
             pillHotRect: pillHotRect,
+            showsPill: showsPill,
             leftCapRect: leftCapRect,
             collapsedFrame: collapsedFrame,
             expandedFrame: expandedFrame,
@@ -566,6 +600,7 @@ extension NotchGeometry: CustomStringConvertible {
             \(r("pillRect", pillRect))
             \(r("pillContentRect", pillContentRect))
             \(r("pillHotRect", pillHotRect))
+              showsPill       \(showsPill)
             \(r("collapsedFrame", collapsedFrame))
             \(r("expandedFrame", expandedFrame))
             \(r("listRect", listRect))
