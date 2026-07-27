@@ -77,12 +77,16 @@ final class SessionStore {
     /// installing the hook while the app runs clears the message.
     private(set) var hookInstalled = HookProbe.isInstalled()
 
-    /// pid → owning application name, for tty-less rows. Cached because the
-    /// answer cannot change for a live pid and the lookup walks the process tree.
-    @ObservationIgnored private var ownerNameCache: [Int32: String] = [:]
-    /// Bumped whenever `ownerNameCache` gains an entry, so SwiftUI re-reads the
-    /// labels that depend on it. (`ownerNameCache` itself is observation-ignored:
-    /// a dictionary read per row per second would register a dependency on every
+    /// pid → owning application. Cached because the answer cannot change for a
+    /// live pid and the lookup walks the process tree. Resolved for every
+    /// session with a pid, not only tty-less ones: a real tty owned by Zed, VS
+    /// Code or Cursor is the row-labelling signal that says "this is running
+    /// inside an IDE", not just the tty-less fallback for Claude.app's embedded
+    /// agent.
+    @ObservationIgnored private var ownerCache: [Int32: OwningApp] = [:]
+    /// Bumped whenever `ownerCache` gains an entry, so SwiftUI re-reads the
+    /// labels that depend on it. (`ownerCache` itself is observation-ignored: a
+    /// dictionary read per row per second would register a dependency on every
     /// pid in it.)
     private(set) var ownerNameGeneration = 0
 
@@ -91,7 +95,7 @@ final class SessionStore {
     @ObservationIgnored private var registry: SessionRegistry
     @ObservationIgnored private let focuser: TerminalFocuser
     @ObservationIgnored private let activator: any AppActivating
-    @ObservationIgnored private let ownerLookup: @Sendable (Int32) -> String?
+    @ObservationIgnored private let ownerLookup: @Sendable (Int32) -> OwningApp?
 
     /// Focus work runs here. `TerminalFocuser` spawns `osascript` and
     /// `activate` talks to the window server; neither may ever run on the main
@@ -116,7 +120,7 @@ final class SessionStore {
         registry: SessionRegistry = SessionRegistry(),
         focuser: TerminalFocuser,
         activator: any AppActivating,
-        ownerLookup: @escaping @Sendable (Int32) -> String?
+        ownerLookup: @escaping @Sendable (Int32) -> OwningApp?
     ) {
         self.registry = registry
         self.focuser = focuser
@@ -271,9 +275,17 @@ final class SessionStore {
 
     // MARK: - Labels
 
-    /// Owning application name for a tty-less session, e.g. "Claude".
+    /// The owning application's name, but only when it is worth telling the user
+    /// about: never Terminal.app (the ordinary case, which needs no label) and
+    /// never "no answer yet". For a tty-less session (Claude.app's embedded
+    /// agent) this is the whole row label; for a real tty owned by something
+    /// else — Zed, VS Code, Cursor — `SliceRow` appends it, which is what makes
+    /// an IDE-hosted session visibly different from a plain Terminal one.
     func ownerName(forPid pid: Int32) -> String? {
-        ownerNameCache[pid]
+        guard let owner = ownerCache[pid], owner.bundleID != terminalBundleIdentifier else {
+            return nil
+        }
+        return owner.localizedName
     }
 
     // MARK: - Snapshot
@@ -283,7 +295,7 @@ final class SessionStore {
         let snapshot = registry.aggregate()
 
         sessionCounts.set(snapshot.count)
-        resolveOwnerNames(in: ordered)
+        resolveOwners(in: ordered)
 
         // Assign only on change. `Observation` does not diff, so writing an
         // equal array would invalidate every row's body for nothing.
@@ -291,20 +303,21 @@ final class SessionStore {
         if snapshot != aggregate { aggregate = snapshot }
     }
 
-    /// Resolve app names for tty-less rows, once per pid.
+    /// Resolve the owning application for every session with a pid, once per
+    /// pid.
     ///
     /// Cheap enough for the main actor: it is a `NSRunningApplication` lookup
-    /// plus at most five `sysctl` calls, only for rows that have no tty, and only
-    /// the first time a given pid is seen.
-    private func resolveOwnerNames(in sessions: [Session]) {
+    /// plus at most five `sysctl` calls, and only the first time a given pid is
+    /// seen — every session (Terminal-backed included) needs the answer now,
+    /// not only tty-less ones, so a Zed/VS Code/Cursor row can be labelled too.
+    private func resolveOwners(in sessions: [Session]) {
         var gained = false
         for session in sessions {
-            guard normalizeTty(session.tty) == nil,
-                  let pid = session.pid,
-                  ownerNameCache[pid] == nil,
-                  let name = ownerLookup(pid)
+            guard let pid = session.pid,
+                  ownerCache[pid] == nil,
+                  let owner = ownerLookup(pid)
             else { continue }
-            ownerNameCache[pid] = name
+            ownerCache[pid] = owner
             gained = true
         }
         if gained { ownerNameGeneration += 1 }

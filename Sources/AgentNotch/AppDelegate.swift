@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 log: { message in uiLog.error("\(message, privacy: .public)") }
             ),
             activator: activator,
-            ownerLookup: { pid in activator.owner(ofPid: pid)?.localizedName }
+            ownerLookup: { pid in activator.owner(ofPid: pid) }
         )
         self.store = store
 

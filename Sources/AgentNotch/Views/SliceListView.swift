@@ -42,12 +42,21 @@ struct SliceRow: Identifiable, Equatable {
 
         return sessions.map { session in
             let hasTerminal = normalizeTty(session.tty) != nil
-            var label = self.label(for: session, hasTerminal: hasTerminal, ownerName: ownerName)
+            let owner = session.pid.flatMap(ownerName)
+            var label = self.label(for: session, hasTerminal: hasTerminal, owner: owner)
 
             if let key = ProjectLabel.projectKey(session.cwd),
                projectCounts[key, default: 0] > 1,
                let tty = normalizeTty(session.tty) {
                 label += " · \(tty)"
+            }
+
+            // A real tty owned by something other than Terminal.app is running
+            // inside an IDE's integrated terminal (Zed, VS Code, Cursor…) — a
+            // plain cwd, or even no cwd yet for a not-yet-adopted bootstrap row,
+            // otherwise reads exactly like an ordinary Terminal session.
+            if hasTerminal, let owner {
+                label += " · \(owner)"
             }
 
             return SliceRow(
@@ -66,12 +75,12 @@ struct SliceRow: Identifiable, Equatable {
     private static func label(
         for session: Session,
         hasTerminal: Bool,
-        ownerName: (Int32) -> String?
+        owner: String?
     ) -> String {
         if let project = ProjectLabel.display(session.cwd) { return project }
         // No cwd. For a tty-less session the owning application IS the most
         // useful identity we have ("Claude" for the desktop app's embedded agent).
-        if !hasTerminal, let pid = session.pid, let name = ownerName(pid) { return name }
+        if !hasTerminal, let owner { return owner }
         return session.source.displayName
     }
 
