@@ -54,6 +54,9 @@ enum FocusCLI {
         if arguments.contains("--geometry") {
             return MainActor.assumeIsolated { geometry(verbose: true) }
         }
+        if arguments.contains("--menubar") {
+            return MainActor.assumeIsolated { menuBar(arguments) }
+        }
         if arguments.contains("--notch-harness") {
             return MainActor.assumeIsolated { notchHarness() }
         }
@@ -387,6 +390,95 @@ enum FocusCLI {
             }
         }
         return ok ? 0 : 1
+    }
+
+    // MARK: - --menubar
+
+    /// Where everybody else's status items are, and whether we would be sitting
+    /// on one.
+    ///
+    /// Runs headless, before any UI exists, so it measures the menu bar as the
+    /// user actually has it rather than one that already contains our window.
+    /// This is also the command that decides whether the whole yield mechanism
+    /// can be trusted on a given macOS: if `trust` reads untrusted here, nothing
+    /// downstream should act on these numbers.
+    @MainActor
+    private static func menuBar(_ arguments: [String]) -> Int32 {
+        let scanner = MenuBarScanner()
+        let screens = NSScreen.screens
+        guard let screen = screens.first else {
+            print("menu bar:         no screens attached")
+            return 1
+        }
+
+        let metrics = ScreenMetrics(
+            displayID: ScreenMetricsReader.displayID(of: screen),
+            frame: screen.frame,
+            auxLeftWidth: screen.auxiliaryTopLeftArea?.width ?? 0,
+            auxRightWidth: screen.auxiliaryTopRightArea?.width ?? 0,
+            safeAreaTop: screen.safeAreaInsets.top
+        )
+        let bandHeight = metrics.hasNotch ? metrics.safeAreaTop : NotchLayout.default.fallbackBandHeight
+        let windows = scanner.sample()
+        let occupancy = MenuBarScan.occupancy(
+            windows: windows,
+            screen: metrics,
+            bandHeight: bandHeight,
+            primaryScreenMaxY: scanner.primaryScreenMaxY)
+
+        let f = { (v: CGFloat) in String(format: "%.1f", v) }
+        print("menu bar:         \(screen.localizedName) (display \(metrics.displayID))")
+        print("  primaryMaxY     \(f(scanner.primaryScreenMaxY))   bandHeight \(f(bandHeight))"
+            + "   statusLayer \(MenuBarScan.defaultStatusLayer)")
+        let atLayer = windows.filter { $0.layer == MenuBarScan.defaultStatusLayer }
+        print("  windows         \(windows.count) on screen, \(atLayer.count) at the status layer,"
+            + " \(occupancy.items.count) in the band")
+
+        // Raw and converted side by side. If the y-flip is ever wrong, it is
+        // wrong here first and visibly — the converted band would not be flush
+        // with the screen top.
+        print("    wid      cgBounds (y-down)             appKit (y-up)")
+        for window in atLayer.sorted(by: { $0.cgBounds.minX < $1.cgBounds.minX }) {
+            let cg = window.cgBounds
+            let ak = MenuBarScan.appKitRect(fromCGWindowBounds: cg,
+                                            primaryScreenMaxY: scanner.primaryScreenMaxY)
+            let kept = occupancy.items.contains { abs($0.minX - ak.minX) < 0.5 && abs($0.width - ak.width) < 0.5 }
+            print("    \(String(window.windowID).padding(toLength: 8, withPad: " ", startingAt: 0))"
+                + "x=\(f(cg.minX)) y=\(f(cg.minY)) \(f(cg.width))x\(f(cg.height))"
+                + "      x=\(f(ak.minX)) y=\(f(ak.minY)) \(f(ak.width))x\(f(ak.height))"
+                + (kept ? "" : "   (filtered out)"))
+        }
+
+        switch occupancy.trust {
+        case .trusted:
+            print("  trust           trusted (items tile and end at the screen edge)")
+        case .untrusted(let reason):
+            print("  trust           UNTRUSTED — \(reason)")
+        }
+        if let runMinX = occupancy.statusRunMinX {
+            print("  statusRunMinX   \(f(runMinX))")
+        } else {
+            print("  statusRunMinX   none")
+        }
+
+        // What we would occupy, in both pill states, against what we just found.
+        let threeRows = NotchListMetrics.headerHeight
+            + 3 * NotchListMetrics.rowHeight
+            + 2 * NotchListMetrics.separatorHeight
+        for (label, sessions) in [("idle (0)", 0), ("busy (3)", 3)] {
+            let g = NotchGeometryResolver.resolve(
+                screen: metrics,
+                listContentHeight: threeRows,
+                pillContentWidth: PillMetrics.contentWidth(sessionCount: sessions))
+            let edge = g.collapsedFrame.maxX
+            let clearance = occupancy.clearance(rightOf: edge)
+            let verdict = clearance.map { $0 >= 0 ? "clear by \(f($0)) pt" : "OVERLAPS by \(f(-$0)) pt" }
+                ?? "unknown"
+            print("  footprint \(label.padding(toLength: 9, withPad: " ", startingAt: 0))"
+                + "ends at \(f(edge))   \(verdict)")
+        }
+
+        return occupancy.trust.isTrusted ? 0 : 1
     }
 
     /// Drive `HoverEngineCore` with synthetic samples and report the frames the
