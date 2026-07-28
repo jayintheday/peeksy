@@ -344,13 +344,19 @@ final class NotchController {
         let metrics = screens.metrics(for: screen)
         yieldMeansHide = !metrics.hasNotch
 
-        // What we would occupy if we were NOT yielding. Asking about the
-        // yielded footprint would be circular — it always fits, so we would
-        // never come back.
+        // What we would occupy at each level that draws something. Asking about
+        // the yielded footprint would be circular — it always fits, so we would
+        // never come back. Both come from the resolver rather than from
+        // arithmetic here, so padding and clamping are counted once.
         let atFull = NotchGeometryResolver.resolve(
             screen: metrics,
             listContentHeight: 0,
             pillContentWidth: wantedPillWidth(),
+            layout: layout)
+        let atCompact = NotchGeometryResolver.resolve(
+            screen: metrics,
+            listContentHeight: 0,
+            pillContentWidth: min(wantedPillWidth(), PillMetrics.capsuleHeight),
             layout: layout)
 
         let occupancy = scanner.occupancy(
@@ -361,14 +367,16 @@ final class NotchController {
             calibration: panel.map { (UInt32($0.windowNumber), $0.frame) })
 
         let before = yield.level
-        guard yield.apply(occupancy, fullFootprintMaxX: atFull.collapsedFrame.maxX) else {
-            return false
-        }
+        let footprints = YieldFootprints(
+            full: atFull.collapsedFrame.maxX,
+            compact: atCompact.collapsedFrame.maxX)
+        guard yield.apply(occupancy, footprints: footprints) else { return false }
         uiLog.info("""
             menu bar yield \(String(describing: before), privacy: .public) → \
             \(String(describing: self.yield.level), privacy: .public) \
             (run at \(occupancy.statusRunMinX ?? -1, privacy: .public), \
-            we would end at \(atFull.collapsedFrame.maxX, privacy: .public))
+            we would end at \(footprints.full, privacy: .public) full / \
+            \(footprints.compact, privacy: .public) compact)
             """)
         return true
     }

@@ -75,10 +75,23 @@ struct PillView: View {
         }
     }
 
+    /// Is there a count, AND room reserved to draw it in?
+    ///
+    /// Both halves are load-bearing. The geometry can hand this view the DOT's
+    /// width rather than the capsule's — that is `NotchYieldLevel.compact`,
+    /// which is what the pill falls back to instead of vanishing when a
+    /// neighbour's status item leaves it no room. Drawing a count into a slot
+    /// sized for a dot is exactly the "drawn drifts from reserved" bug
+    /// `PillMetrics` exists to prevent, and it would put the digit on menu bar
+    /// the window never claimed.
+    private var showsCount: Bool {
+        aggregate.count > 0 && contentWidth >= PillMetrics.countedWidth
+    }
+
     private var capsule: some View {
         HStack(spacing: 4) {
             dot
-            if aggregate.count > 0 {
+            if showsCount {
                 Text("\(aggregate.count)")
                     // SF Rounded reads as system chrome next to the menu bar.
                     .font(.system(size: 12, weight: .semibold, design: .rounded))

@@ -512,21 +512,32 @@ enum FocusCLI {
         let threeRows = NotchListMetrics.headerHeight
             + 3 * NotchListMetrics.rowHeight
             + 2 * NotchListMetrics.separatorHeight
-        var edges: [String: CGFloat] = [:]
+        var edges: [String: YieldFootprints] = [:]
         for (label, sessions) in [("idle (0)", 0), ("busy (3)", 3)] {
-            let g = NotchGeometryResolver.resolve(
-                screen: metrics,
-                listContentHeight: threeRows,
-                pillContentWidth: PillMetrics.contentWidth(sessionCount: sessions))
-            let edge = g.collapsedFrame.maxX
-            edges[label] = edge
-            let clearance = occupancy.clearance(rightOf: edge)
+            let wanted = PillMetrics.contentWidth(sessionCount: sessions)
+            func edge(_ width: CGFloat) -> CGFloat {
+                NotchGeometryResolver.resolve(
+                    screen: metrics,
+                    listContentHeight: threeRows,
+                    pillContentWidth: width).collapsedFrame.maxX
+            }
+            // The compact footprint is the counted pill minus its digits — for
+            // the idle scenario the two are the same width already.
+            let footprints = YieldFootprints(
+                full: edge(wanted), compact: edge(min(wanted, PillMetrics.capsuleHeight)))
+            edges[label] = footprints
+            let clearance = occupancy.clearance(rightOf: footprints.full)
             let verdict = clearance.map { $0 >= 0 ? "clear by \(f($0)) pt" : "OVERLAPS by \(f(-$0)) pt" }
                 ?? "unknown"
             var yield = NeighbourYield()
-            yield.apply(occupancy, fullFootprintMaxX: edge)
+            yield.apply(occupancy, footprints: footprints)
+            // The compact edge is the interesting number when it yields: it says
+            // whether the dot would have fitted where the capsule did not.
+            let fallback = yield.level == .full
+                ? ""
+                : "   (dot ends at \(f(footprints.compact)))"
             print("  footprint \(label.padding(toLength: 9, withPad: " ", startingAt: 0))"
-                + "ends at \(f(edge))   \(verdict)   → \(yield.level)")
+                + "ends at \(f(footprints.full))   \(verdict)   → \(yield.level)\(fallback)")
         }
 
         // `--menubar --simulate 883` runs the real policy against a hypothetical
@@ -544,23 +555,23 @@ enum FocusCLI {
                 trust: .trusted)
             print("  simulate        status run at x=\(f(runMinX))")
             for label in ["idle (0)", "busy (3)"] {
-                guard let edge = edges[label] else { continue }
+                guard let footprints = edges[label] else { continue }
                 var yield = NeighbourYield()
-                yield.apply(pretend, fullFootprintMaxX: edge)
-                // And what it would take to come back, from yielded.
+                yield.apply(pretend, footprints: footprints)
+                // And what it would take to climb back, from fully yielded.
                 var returning = NeighbourYield()
                 returning.apply(
                     MenuBarOccupancy(displayID: metrics.displayID, statusRunMinX: 0,
                                      items: [], trust: .trusted),
-                    fullFootprintMaxX: edge)
+                    footprints: footprints)
                 var confirmations = 0
                 while returning.level == .yielded && confirmations < 8 {
                     confirmations += 1
-                    if returning.apply(pretend, fullFootprintMaxX: edge) { break }
+                    if returning.apply(pretend, footprints: footprints) { break }
                 }
-                let back = returning.level == .full
-                    ? "would release after \(confirmations) sample(s)"
-                    : "would stay yielded"
+                let back = returning.level == .yielded
+                    ? "would stay yielded"
+                    : "would reach \(returning.level) after \(confirmations) sample(s)"
                 print("    \(label.padding(toLength: 12, withPad: " ", startingAt: 0))"
                     + "→ \(yield.level)   (from yielded: \(back))")
             }
