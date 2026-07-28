@@ -37,8 +37,17 @@ func env(
 }
 
 /// A registry whose pid liveness is a pure function of the injected set.
-func registry(alive: Set<Int32> = [], policy: ReapPolicy = .default) -> SessionRegistry {
-    SessionRegistry(policy: policy, isPidAlive: { alive.contains($0) })
+///
+/// `agents` is the second half of the answer: which of those live pids are
+/// agent processes rather than an IDE host that outlives its sessions. Left
+/// `nil` it means "no sweep has landed", under which a live pid is simply
+/// alive — the pre-sweep behaviour, and what most of these tests want.
+func registry(
+    alive: Set<Int32> = [],
+    policy: ReapPolicy = .default,
+    agents: AgentPidScan? = nil
+) -> SessionRegistry {
+    SessionRegistry(policy: policy, isPidAlive: { alive.contains($0) }, agentPidScan: agents)
 }
 
 @Suite("SessionRegistry: state machine")

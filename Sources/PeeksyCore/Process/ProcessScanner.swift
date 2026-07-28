@@ -47,6 +47,21 @@ public struct ProcessScanner: Sendable {
         return ProcessScan.merge(processes, cwds: ProcessScan.parseLsofCwd(open))
     }
 
+    /// Which live pids are agent processes. Blocking — call it off the main
+    /// thread, same as `scan`.
+    ///
+    /// The `ps` half of `scan` and nothing else: `nil` when the sweep failed,
+    /// which the reaper reads as "no information", never as "no agents". No
+    /// `lsof` and no tty rule — a cwd is a label and a tty is a click target,
+    /// and this answers neither question. It only asks whether a pid the reaper
+    /// is about to trust belongs to an agent or to the IDE hosting one, and it
+    /// runs every 15 s rather than once at launch, so the fork it does not do is
+    /// the expensive one.
+    public func liveAgentPids(names: Set<String> = ClaudeCodeAdapter.processNames) -> Set<Int32>? {
+        guard let listing = run("/bin/ps", ["-Ao", "pid=,ppid=,tty=,comm="]) else { return nil }
+        return Set(ProcessScan.parsePS(listing, names: names, requireTerminal: false).map(\.pid))
+    }
+
     // MARK: - Private
 
     private func run(_ executable: String, _ arguments: [String]) -> String? {

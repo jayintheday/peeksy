@@ -118,6 +118,9 @@ final class SessionStore {
     @ObservationIgnored private let activator: any AppActivating
     @ObservationIgnored private let ownerLookup: @Sendable (Int32) -> OwningApp?
     @ObservationIgnored private let titleReader: TranscriptTitleReader
+    /// The `ps` sweep behind `refreshAgentPids`. A seam, for the same reason
+    /// `ownerLookup` is one: it forks a process, and no test may.
+    @ObservationIgnored private let pidScanner: @Sendable () -> Set<Int32>?
 
     /// Focus work runs here. `TerminalFocuser` spawns `osascript` and
     /// `activate` talks to the window server; neither may ever run on the main
@@ -125,13 +128,20 @@ final class SessionStore {
     @ObservationIgnored private let focusQueue = DispatchQueue(
         label: "com.peeksy.focus", qos: .userInitiated)
 
-    /// Transcript reads run here — NOT on `focusQueue`.
+    /// The reap tick's off-main work runs here — NOT on `focusQueue`.
     ///
     /// `focusQueue` is serial and it is the click path. Queueing a batch of file
     /// reads onto it would put disk latency in front of the app's primary
     /// interaction. This is a third dispatch queue, not a second ingest edge:
     /// the "one cross-actor edge" invariant is about the socket hop that admits
     /// events to the model, and this queue admits nothing.
+    ///
+    /// Two jobs ride it, both driven by the same 15 s tick and both bounded: the
+    /// transcript reads that resolve task titles, and the `ps` sweep that tells
+    /// the reaper which pids are agents. A fourth queue to separate them would
+    /// buy nothing — the sweep tolerates a full `scanFreshness` of latency and
+    /// the reads are a tail per session — and a 24/7 accessory app should not
+    /// hold threads it cannot justify.
     @ObservationIgnored private let titleQueue = DispatchQueue(
         label: "com.peeksy.title", qos: .utility)
 
@@ -156,13 +166,15 @@ final class SessionStore {
         focuser: TerminalFocuser,
         activator: any AppActivating,
         ownerLookup: @escaping @Sendable (Int32) -> OwningApp?,
-        titleReader: TranscriptTitleReader = .system
+        titleReader: TranscriptTitleReader = .system,
+        pidScanner: @escaping @Sendable () -> Set<Int32>? = { ProcessScanner().liveAgentPids() }
     ) {
         self.registry = registry
         self.focuser = focuser
         self.activator = activator
         self.ownerLookup = ownerLookup
         self.titleReader = titleReader
+        self.pidScanner = pidScanner
         publish()
     }
 
@@ -180,6 +192,7 @@ final class SessionStore {
             }
         case let .removed(id):
             forgetTitle(id)
+            pruneOwnerCache()
         case let .dropped(reason):
             Log.registry.error("dropped event: \(reason, privacy: .public)")
             return
@@ -237,6 +250,12 @@ final class SessionStore {
     }
 
     func reapTick() {
+        // Kicked off first, consumed NEXT tick. The reap below judges sessions
+        // against the sweep taken 15 s ago, never one taken after the state it
+        // is judging — and a sweep that has not landed yet is simply absent,
+        // which `liveness` reads as "no information".
+        refreshAgentPids()
+
         let result = registry.reap(now: Date())
         if !result.isEmpty {
             uiLog.info("""
@@ -245,7 +264,10 @@ final class SessionStore {
                 permissions expired \(result.permissionsExpired.count, privacy: .public)
                 """)
         }
-        for id in result.removed { forgetTitle(id) }
+        if !result.removed.isEmpty {
+            for id in result.removed { forgetTitle(id) }
+            pruneOwnerCache()
+        }
         hookInstalled = HookProbe.isInstalled()
         refreshTitles()
         publish()
@@ -254,6 +276,28 @@ final class SessionStore {
         // repeating source in a 24/7 accessory app is a cost with no upside, and
         // a 0.31 ms window-list scan every 15 s is free next to a reap.
         onHousekeeping?()
+    }
+
+    // MARK: - Agent pids
+
+    /// Re-sweep which live pids are agent processes.
+    ///
+    /// The reaper needs this because a live pid is not the same claim as a live
+    /// session: for an IDE agent panel the pid on the wire is the extension
+    /// host, which outlives every chat inside it. See
+    /// `SessionRegistry.liveness(of:now:)`.
+    ///
+    /// A failed sweep leaves the previous one in place rather than publishing an
+    /// empty set — `scanFreshness` then ages it out on its own. Writing `[]`
+    /// here would tell the reaper that nothing on the machine is an agent, and
+    /// every row would fall to `orphanTTL` at once.
+    private func refreshAgentPids() {
+        let scanner = pidScanner
+        titleQueue.async { [weak self] in
+            guard let pids = scanner() else { return }
+            let scan = AgentPidScan(pids: pids, at: Date())
+            Task { @MainActor in self?.registry.agentPidScan = scan }
+        }
     }
 
     // MARK: - Task titles
@@ -335,6 +379,42 @@ final class SessionStore {
         transcriptPaths[id] = nil
         taskTitles[id] = nil
         titleReadAt[id] = nil
+    }
+
+    // MARK: - Dismiss
+
+    /// Forget a row on the user's say-so.
+    ///
+    /// The escape hatch for the case the reaper cannot decide: an IDE-hosted
+    /// session whose pid belongs to a host that is still very much alive has no
+    /// liveness signal at all, and `orphanTTL` is a guess about how long to
+    /// wait. The user knows. This costs no panel height — it hangs off a context
+    /// menu, not a control — which is the only reason it can exist at all
+    /// without a pinned constant.
+    ///
+    /// Unlike `focus`, the panel deliberately stays open: clearing several dead
+    /// rows in a row is the whole use case.
+    func dismiss(_ session: Session) {
+        guard registry.remove(id: session.id) else { return }
+        uiLog.info("dismissed \(session.id, privacy: .public)")
+        forgetTitle(session.id)
+        pruneOwnerCache()
+        publish()
+    }
+
+    /// Drop cached app names for pids no session refers to any more.
+    ///
+    /// `ownerCache` is keyed by pid and pids are recycled. Without this, a pid
+    /// that resolved to Cursor an hour ago hands that label to whatever
+    /// unrelated process inherits the number — and the cache is never otherwise
+    /// invalidated, because for a LIVE pid the answer genuinely cannot change.
+    ///
+    /// No `ownerNameGeneration` bump: the rows that depended on these entries
+    /// are the ones that just went away.
+    private func pruneOwnerCache() {
+        guard !ownerCache.isEmpty else { return }
+        let live = Set(registry.sessions.values.compactMap(\.pid))
+        ownerCache = ownerCache.filter { live.contains($0.key) }
     }
 
     // MARK: - Focus

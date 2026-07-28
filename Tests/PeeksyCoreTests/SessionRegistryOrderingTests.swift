@@ -14,7 +14,9 @@ struct SessionRegistryOrderingTests {
 
         // Only this one is old enough for the reaper to relabel.
         r.apply(env("PreToolUse", id: "stale", pid: 1), now: t0)
-        let now = t0.addingTimeInterval(700) // > policy.stale (600), < policy.reap (1800)
+        // > policy.stale (600). Removal never enters into it: pid 1 is alive and
+        // no sweep has landed to contradict that, so the row is `.alive`.
+        let now = t0.addingTimeInterval(700)
         r.reap(now: now)
         #expect(r["stale"]?.state == .stale)
 

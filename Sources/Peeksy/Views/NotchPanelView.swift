@@ -81,6 +81,9 @@ struct NotchPanelView: View {
 
     @State private var now = Date()
     @State private var hovered: String?
+    /// Separate from `hovered`: the row highlight and the Dismiss glyph's own
+    /// highlight are different questions, and the glyph sits inside the row.
+    @State private var dismissHovered: String?
     @State private var installHovered = false
     /// The header's two faces. See `header` for why this may never cost height.
     @State private var showSettings = false
@@ -263,6 +266,36 @@ struct NotchPanelView: View {
             .onTapGesture { onRowTap(row.session) }
     }
 
+    /// Dismiss, in the space the elapsed time already occupies.
+    ///
+    /// NOT a context menu, and that is not a style choice. A menu is its own
+    /// window: while `.peeking` the pointer moving into it leaves the panel's
+    /// hover zones and `HoverEngineCore` collapses the panel out from under it,
+    /// and while `.pinned` the menu takes key away, which `DismissMonitor`
+    /// reads as `didResignKey` and dismisses on. A control that lives inside the
+    /// row keeps the pointer inside the panel and is invisible to both machines.
+    /// (`SliceListView` is a plain window with neither, so it keeps its menu.)
+    ///
+    /// Overlaid rather than swapped so the row does not re-lay-out under the
+    /// pointer, and it costs no height at all — it goes where height is already
+    /// reserved, which is the only way a new panel control is allowed to exist.
+    private func dismissButton(_ row: SliceRow) -> some View {
+        Button {
+            store.dismiss(row.session)
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(dismissHovered == row.id ? 0.9 : 0.5))
+                // Bigger than the glyph so it is hittable, small enough that it
+                // cannot swallow a click meant for the row itself.
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { dismissHovered = $0 ? row.id : (dismissHovered == row.id ? nil : dismissHovered) }
+        .help("Dismiss this row")
+    }
+
     private func rowBody(_ row: SliceRow) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
@@ -301,6 +334,12 @@ struct NotchPanelView: View {
                     .font(.system(size: 11))
                     .monospacedDigit()
                     .foregroundStyle(.white.opacity(0.4))
+                    // The age is the least useful thing on a row you are already
+                    // pointing at, so it lends its space to Dismiss and keeps
+                    // its width — hiding it rather than removing it is what
+                    // stops the row shifting under the pointer.
+                    .opacity(hovered == row.id ? 0 : 1)
+                    .overlay { if hovered == row.id { dismissButton(row) } }
             }
             if let detail = row.detail {
                 Text(detail)

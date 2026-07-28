@@ -221,3 +221,37 @@ struct ProcessScanSeedTests {
         #expect(r["boot:47624"] == nil)
     }
 }
+
+/// The one link the fixtures above cannot cover: `liveAgentPids` actually
+/// forking `/bin/ps` and getting a usable answer back on this machine.
+///
+/// Worth a real process because the failure is silent and expensive. If the
+/// sweep came back empty — a `ps` that moved, an output format that changed, a
+/// parse that stopped matching — the reaper would read it as "nothing here is
+/// an agent" and put every live session on the `orphanTTL` clock. Nothing else
+/// in the suite would notice: every other reap test injects its pid set.
+@Suite("ProcessScanner: the live sweep")
+struct ProcessScannerLiveTests {
+
+    @Test("the sweep finds THIS process when asked for its own name")
+    func findsSelf() throws {
+        // Our own executable, whatever the test runner happens to be called.
+        // Asking for `claude` would make the test depend on the machine having
+        // an agent running, which is exactly the flake this avoids.
+        let me = ProcessScan.basename(CommandLine.arguments[0])
+        let pids = try #require(ProcessScanner().liveAgentPids(names: [me]))
+
+        #expect(pids.contains(getpid()))
+    }
+
+    @Test("a name nothing on the machine has sweeps to empty, not to nil")
+    func emptyIsNotFailure() throws {
+        // The distinction the reaper turns on: an empty set is a real answer
+        // ("no agents running"), nil is "the sweep failed". Only nil is allowed
+        // to leave the previous scan standing.
+        let pids = try #require(
+            ProcessScanner().liveAgentPids(names: ["not-a-real-process-name-9c3f"]))
+
+        #expect(pids.isEmpty)
+    }
+}

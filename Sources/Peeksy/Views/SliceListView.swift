@@ -151,6 +151,9 @@ struct SliceListView: View {
                         rowBody(row)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Dismiss") { store.dismiss(row.session) }
+                    }
                     Divider()
                 }
             }

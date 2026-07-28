@@ -63,14 +63,20 @@ public struct SessionRegistry: Sendable {
     public private(set) var sessions: [String: Session]
     public var policy: ReapPolicy
     public var isPidAlive: PidLiveness
+    /// Which live pids are actually agent processes. Refreshed off the main
+    /// actor from the reap tick; `nil` until the first sweep lands, and treated
+    /// as absent once older than `policy.scanFreshness`.
+    public var agentPidScan: AgentPidScan?
 
     public init(
         policy: ReapPolicy = .default,
-        isPidAlive: @escaping PidLiveness = systemPidLiveness
+        isPidAlive: @escaping PidLiveness = systemPidLiveness,
+        agentPidScan: AgentPidScan? = nil
     ) {
         self.sessions = [:]
         self.policy = policy
         self.isPidAlive = isPidAlive
+        self.agentPidScan = agentPidScan
     }
 
     // MARK: - Reads (pure)
@@ -191,6 +197,17 @@ public struct SessionRegistry: Sendable {
         return .updated(id)
     }
 
+    /// Forget a session outright. Returns false if there was nothing to forget.
+    ///
+    /// The user's escape hatch, for the row the heuristics get wrong. Safe to
+    /// offer because it is not destructive: this app owns no session state that
+    /// the session itself will not re-assert. A live agent's next hook event
+    /// re-registers it through `apply` with its real state intact.
+    @discardableResult
+    public mutating func remove(id: String) -> Bool {
+        sessions.removeValue(forKey: id) != nil
+    }
+
     /// Seed from a launch-time process scan.
     ///
     /// Skips pids/ttys already tracked, so running it after hooks have started
@@ -263,12 +280,36 @@ public struct SessionRegistry: Sendable {
         return found.id
     }
 
+    /// What the reaper can prove about the process behind a session.
+    ///
+    /// The middle guard is the load-bearing one. A pid the hook reported is the
+    /// process that SPAWNED the hook, which for a terminal-hosted agent is the
+    /// agent itself — but for an IDE agent panel it is the extension-host helper
+    /// (see LEARNINGS, "Agents inside IDEs"). That helper hosts many chats and
+    /// outlives every one of them, so `kill(pid, 0)` says "alive" about a chat
+    /// closed hours ago. Answering `.alive` there made those rows immortal:
+    /// removal required a dead pid, and the pid never died.
+    ///
+    /// So liveness is only believed when the pid is itself an agent process.
+    /// Anything else is `.unknown` and falls to a time ceiling — including the
+    /// case where we have no scan to check against, which stays `.alive` because
+    /// a failed `ps` must never start reaping live sessions.
+    func liveness(of session: Session, now: Date) -> PidStatus {
+        guard let pid = session.pid, pid > 0 else { return .unknown }
+        guard isPidAlive(pid) else { return .dead }
+        guard let scan = agentPidScan,
+              max(0, now.timeIntervalSince(scan.at)) < policy.scanFreshness
+        else { return .alive }
+        return scan.pids.contains(pid) ? .alive : .unknown
+    }
+
     /// One housekeeping pass. Idempotent, no timers — the caller drives this
     /// from a 15 s `Timer`.
     ///
     /// Three jobs, in this order per session:
-    ///  1. remove: idle ≥ `policy.reap` AND the pid is dead (a nil pid counts as
-    ///     dead — we cannot prove it is alive, and it has been half an hour);
+    ///  1. remove: a `.dead` pid idle ≥ `policy.deadGrace`, or an `.unknown` one
+    ///     idle ≥ `policy.orphanTTL`. An `.alive` agent is never time-removed,
+    ///     however long it has been quiet;
     ///  2. expire: `pendingPermission` older than `policy.permissionTTL`;
     ///  3. stale: a `.working` session idle ≥ `policy.stale`.
     ///
@@ -287,11 +328,14 @@ public struct SessionRegistry: Sendable {
             // every comparison below false forever and the reaper silently stops.
             let idle = max(0, now.timeIntervalSince(s.updatedAt))
 
-            let alive = s.pid.map { isPidAlive($0) } ?? false
-            if idle >= policy.reap, !alive {
+            switch liveness(of: s, now: now) {
+            case .dead where idle >= policy.deadGrace,
+                 .unknown where idle >= policy.orphanTTL:
                 sessions.removeValue(forKey: id)
                 removed.append(id)
                 continue
+            case .alive, .dead, .unknown:
+                break
             }
 
             if let pending = s.pendingPermission {
