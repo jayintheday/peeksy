@@ -214,6 +214,15 @@ public struct NotchGeometry: Sendable, Equatable {
     /// The window is only ever as large as the thing it draws, so a transparent
     /// region that swallows clicks meant for other apps cannot exist.
     public let collapsedFrame: CGRect
+    /// CENTRED on the notch (on the pill where there is no notch), so the open
+    /// panel reads as dropping out of the middle of the display rather than
+    /// hanging off the side of it.
+    ///
+    /// It does NOT share the collapsed frame's top-left origin — the collapsed
+    /// band cannot be centred on the same anchor, because the pill hangs off its
+    /// right-hand side. It always CONTAINS the collapsed frame, and its origin
+    /// therefore only ever moves LEFT to open, which is what keeps the window a
+    /// pure grow-to-open step function.
     public let expandedFrame: CGRect
     /// Height of the animating list container. `expandedFrame.height - bandHeight`.
     public let listHeight: CGFloat
@@ -379,18 +388,56 @@ public enum NotchGeometryResolver {
         // which is exactly the non-notch behaviour we want.
         let collapsedFrame = notchRect.union(pillHotRect).union(leftCapRect)
 
-        // Expanded. The top-left origin is IDENTICAL to the collapsed frame's,
-        // which is what lets the SwiftUI content sit in a `.topLeading` frame
-        // and animate its own size without the window origin ever moving.
-        let room = f.maxX - collapsedFrame.minX
-        var expandedWidth = min(layout.preferredPanelWidth, room)
+        // Expanded. CENTRED on the notch — or on the pill, where there is no
+        // notch and the pill stands where the notch would have been.
+        //
+        // The collapsed band is NOT centred on that anchor: the pill hangs off
+        // its right-hand side. So the window's top-left MOVES when the panel
+        // opens, and it only ever moves LEFT. That is why `NotchChrome`
+        // compensates against the window's LIVE frame, and why `phase` is not a
+        // proxy for where the window is — on a collapse the phase flips at the
+        // start of the animation and the frame shrinks at the end.
+        let anchorX = hasNotch ? notchRect.midX : pillRect.midX
+
+        // Width first: the preference, capped by the display, floored by the
+        // collapsed footprint — the window may only ever GROW to open. No longer
+        // capped by the room to the RIGHT of the notch, because the panel now
+        // uses both sides of it.
+        var expandedWidth = min(layout.preferredPanelWidth, f.width)
         expandedWidth = max(expandedWidth, collapsedFrame.width)
+
+        // Then the position, as ONE clamp into the interval that satisfies both
+        // hard constraints at once. Sequential min/maxes would let the later one
+        // silently undo the earlier. The interval is provably non-empty:
+        // `expandedWidth` lies between `collapsedFrame.width` and `f.width` by
+        // construction, so `lowerX <= upperX` always and the clamp is total.
+        //   lowerX — still contains collapsedFrame, still starts on the display
+        //   upperX — still contains collapsedFrame, still ends on the display
+        // `upperX <= collapsedFrame.minX` is the load-bearing term: it is what
+        // makes the origin's movement one-directional.
+        let lowerX = max(f.minX, collapsedFrame.maxX - expandedWidth)
+        let upperX = min(f.maxX - expandedWidth, collapsedFrame.minX)
+        // ROUNDED before clamping, and that is not tidiness. Measured: AppKit
+        // rounds a window's ORIGIN to whole points — asking for x=565.5 gets a
+        // window at 565.0, silently, while the width survives intact. So a
+        // fractional origin is drift by construction: `refreshHitMask` and
+        // `NotchChrome` both convert against the window's frame, and every one of
+        // those conversions would be half a point out from the window it is
+        // converting against. Half a point of perfect centring is cheaper than a
+        // model that disagrees with the screen. On a 14" this lands the panel on
+        // `screenFrame.midX` exactly — the notch is the thing that is half a
+        // point off centre (`auxLeft` 663 vs `auxRight` 664), not us.
+        //
+        // The clamp comes after, so containment still wins; it can only
+        // reintroduce a fraction on a display whose own edges are fractional,
+        // and there matching the edge exactly is the more important property.
+        let expandedX = min(max((anchorX - expandedWidth / 2).rounded(), lowerX), upperX)
 
         let listCeiling = max(0, f.height * layout.maxListFraction)
         let listHeight = min(max(0, listContentHeight), listCeiling)
         let expandedHeight = bandHeight + listHeight
         let expandedFrame = CGRect(
-            x: collapsedFrame.minX,
+            x: expandedX,
             y: f.maxY - expandedHeight,
             width: expandedWidth,
             height: expandedHeight
@@ -449,6 +496,15 @@ extension NotchGeometryResolver {
     /// drifts back.
     public static let maxTrailingWaste: CGFloat = 8
 
+    /// How far off its anchor the expanded panel's centre may sit.
+    ///
+    /// Half a point, because that is the most that rounding the origin to a
+    /// whole point can cost — and the origin MUST be whole, because AppKit
+    /// rounds a window's origin itself and would otherwise leave the resolved
+    /// geometry disagreeing with the window by that amount. Anything larger is a
+    /// real de-centring, not arithmetic.
+    public static let centringSlack: CGFloat = 0.5
+
     /// `collapsedFrame ⊆ (notchRect ∪ pillHotRect ∪ leftCapRect)` — asserted
     /// live on every geometry change.
     ///
@@ -487,9 +543,18 @@ extension NotchGeometryResolver {
         if !contains(g.expandedFrame, g.collapsedFrame) {
             bad.append("expandedFrame does not contain collapsedFrame — the window would shrink to open")
         }
-        // The whole animation design rests on the window's top-left staying put.
-        if !eq(g.expandedFrame.minX, g.collapsedFrame.minX) {
-            bad.append("expandedFrame.minX \(g.expandedFrame.minX) != collapsedFrame.minX \(g.collapsedFrame.minX)")
+        // The window's top-left no longer stays put, so what replaces "same
+        // origin" is the CENTRING itself — stated so that a display too narrow
+        // to hold a centred panel is still checked rather than exempted. Each
+        // clause below names a real reason the clamp in `resolve` had to give:
+        // the panel is against a screen edge, or it has shrunk to the collapsed
+        // band's own x-range.
+        let anchorX = g.hasNotch ? g.notchRect.midX : g.pillRect.midX
+        let clamped = eq(g.expandedFrame.minX, g.screenFrame.minX)
+            || eq(g.expandedFrame.maxX, g.screenFrame.maxX)
+            || eq(g.expandedFrame.minX, g.collapsedFrame.minX)
+        if !clamped, abs(g.expandedFrame.midX - anchorX) > centringSlack + eps {
+            bad.append("expandedFrame.midX \(g.expandedFrame.midX) is \(abs(g.expandedFrame.midX - anchorX)) pt off anchor \(anchorX) — the panel is not centred")
         }
         if !eq(g.collapsedFrame.maxY, g.screenFrame.maxY) {
             bad.append("collapsedFrame is not flush with the screen top")

@@ -275,7 +275,11 @@ struct NotchGeometryTests {
         // worse than a covered status icon — the clicks are swallowed either way.
         #expect(g.leftCapRect.width == 0)
         #expect(g.collapsedFrame.minX == g.notchRect.minX)
-        #expect(g.expandedFrame.minX == g.collapsedFrame.minX)
+        // The PANEL, however, is centred on the notch — the collapsed band could
+        // not be, because the pill hangs off its right-hand side. So the two
+        // frames do not share an origin, and the expanded one starts further left.
+        #expect(abs(g.expandedFrame.midX - g.notchRect.midX) <= NotchGeometryResolver.centringSlack)
+        #expect(g.expandedFrame.minX < g.collapsedFrame.minX)
     }
 
     @Test("the decorative left cap still works, for anyone who opts back in")
@@ -290,7 +294,10 @@ struct NotchGeometryTests {
         #expect(g.leftCapRect.width == 14)
         #expect(g.leftCapRect.maxX == g.notchRect.minX - layout.pillGap)
         #expect(g.collapsedFrame.minX == g.leftCapRect.minX)
-        #expect(g.expandedFrame.minX == g.collapsedFrame.minX)
+        // The cap widens the collapsed band leftwards; the panel is centred on
+        // the notch regardless, so it lands in exactly the same place as without.
+        #expect(abs(g.expandedFrame.midX - g.notchRect.midX) <= NotchGeometryResolver.centringSlack)
+        #expect(g.expandedFrame.minX < g.collapsedFrame.minX)
         #expect(NotchGeometryResolver.check(g).isSatisfied)
     }
 
@@ -346,11 +353,89 @@ struct NotchGeometryTests {
             let g = NotchGeometryResolver.resolve(screen: screen, listContentHeight: threeRows)
             #expect(g.expandedFrame.contains(g.collapsedFrame))
             #expect(g.expandedFrame.height == g.bandHeight + g.listHeight)
-            // Shared top-left origin. This is what lets SwiftUI animate the
-            // content inside a `.topLeading` frame while the window teleports.
-            #expect(g.expandedFrame.minX == g.collapsedFrame.minX)
+            // The origin moves to open, and only ever LEFT. That one-directional
+            // guarantee is what keeps `stepFrame`'s union a pure grow, and what
+            // lets the chrome unfurl the shape outwards rather than sliding it.
+            #expect(g.expandedFrame.minX <= g.collapsedFrame.minX)
+            // The top edge, though, really is shared — which is what gives every
+            // `swiftUIRect` conversion in the chrome a zero y-origin.
             #expect(g.expandedFrame.maxY == g.collapsedFrame.maxY)
         }
+    }
+
+    @Test("the open panel is centred on the notch, with equal margins either side")
+    func expandedIsCentredOnTheNotch() {
+        for screen in [ScreenFixture.notched14, ScreenFixture.notched16] {
+            for height in [CGFloat(0), 90, threeRows, 4000] {
+                for sessions in [0, 3] {
+                    let g = NotchGeometryResolver.resolve(
+                        screen: screen,
+                        listContentHeight: height,
+                        pillContentWidth: PillMetrics.contentWidth(sessionCount: sessions))
+                    let off = abs(g.expandedFrame.midX - g.notchRect.midX)
+                    #expect(off <= NotchGeometryResolver.centringSlack)
+                    // Said the way a user would see it: the panel sticks out by
+                    // the same amount on the left as on the right, to within the
+                    // one point that a whole-point origin can cost.
+                    let left = g.notchRect.minX - g.expandedFrame.minX
+                    let right = g.expandedFrame.maxX - g.notchRect.maxX
+                    #expect(abs(left - right) <= 2 * NotchGeometryResolver.centringSlack)
+                    #expect(left > 0)
+                    // Whole points, because AppKit rounds a window origin to one
+                    // anyway and a resolved frame the window cannot take is a
+                    // model that disagrees with the screen.
+                    #expect(g.expandedFrame.minX == g.expandedFrame.minX.rounded())
+                    #expect(NotchGeometryResolver.check(g).isSatisfied)
+                }
+            }
+        }
+    }
+
+    @Test("the panel lands in the same place whether or not we are yielding")
+    func centringIgnoresTheYield() {
+        // Yielding shortens the pill and therefore the collapsed frame's RIGHT
+        // edge. The anchor is the notch, so the panel must not budge — a panel
+        // that shuffled sideways when somebody else's status icon appeared would
+        // be the yield leaking into a surface it has no business touching.
+        let full = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14, listContentHeight: threeRows,
+            pillContentWidth: PillMetrics.contentWidth(sessionCount: 3))
+        let yielded = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14, listContentHeight: threeRows,
+            pillContentWidth: 0)
+        #expect(yielded.collapsedFrame == yielded.notchRect)
+        #expect(yielded.expandedFrame == full.expandedFrame)
+    }
+
+    @Test("without a notch the panel centres on the screen instead")
+    func centringWithoutANotch() {
+        for screen in [ScreenFixture.external, ScreenFixture.negativeOrigin] {
+            let g = NotchGeometryResolver.resolve(screen: screen, listContentHeight: threeRows)
+            // The pill already hangs from the middle of the top edge, so the
+            // anchor lands on screen centre and the panel follows it there.
+            #expect(abs(g.expandedFrame.midX - g.screenFrame.midX) <= NotchGeometryResolver.centringSlack)
+            #expect(abs(g.expandedFrame.midX - g.pillRect.midX) <= NotchGeometryResolver.centringSlack)
+            #expect(NotchGeometryResolver.check(g).isSatisfied)
+        }
+        // And nothing here assumes an origin of zero.
+        let g = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.negativeOrigin, listContentHeight: threeRows)
+        #expect(g.expandedFrame.minX < 0)
+    }
+
+    @Test("a panel narrower than the band gives up centring rather than shrinking to open")
+    func panelNarrowerThanTheBand() {
+        // Degenerate, but it is the one case where the two constraints fight:
+        // centring wants the panel left of the pill, containment wants it wide
+        // enough to hold the whole band. Containment must win — a window that
+        // shrank to open would clip its own content away.
+        let layout = NotchLayout(preferredPanelWidth: 200)
+        let g = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14, listContentHeight: threeRows, layout: layout)
+        #expect(g.expandedFrame.width == g.collapsedFrame.width)
+        #expect(g.expandedFrame.minX == g.collapsedFrame.minX)
+        #expect(g.expandedFrame.contains(g.collapsedFrame))
+        #expect(NotchGeometryResolver.check(g).isSatisfied)
     }
 
     @Test("the list is capped at 60% of the screen and scrolls beyond it")
@@ -414,9 +499,13 @@ struct NotchGeometryTests {
             #expect(collapsed.minY == 0)
             let expanded = NotchGeometryResolver.swiftUIRect(g.pillRect, in: g.expandedFrame)
             #expect(expanded.minY == 0)
-            // And the x-offset is phase-independent, which is why the pill
-            // provably cannot drift during the animation.
-            #expect(collapsed.minX == expanded.minX)
+            // The x-offset, by contrast, is NOT phase-independent any more: the
+            // panel is centred on the notch and the collapsed band is not. THIS
+            // difference is exactly what `NotchChrome.windowCompensation` cancels
+            // — it is why the chrome has to be handed the live window frame
+            // instead of inferring one from `phase`.
+            #expect(expanded.minX - collapsed.minX == g.collapsedFrame.minX - g.expandedFrame.minX)
+            #expect(expanded.minX >= collapsed.minX)
         }
     }
 
@@ -512,6 +601,36 @@ struct NotchGeometryTests {
         #expect(report.violations.contains { $0.contains("flush with the screen top") })
     }
 
+    @Test("a panel nudged off centre is reported, not tolerated")
+    func invariantCatchesADeCentredPanel() {
+        // The failure this guards against is somebody re-anchoring the panel to
+        // the collapsed frame "because the origins used to match". It still
+        // contains the collapsed frame and still sits on screen, so every other
+        // check passes and only the centring notices.
+        var g = NotchGeometryResolver.resolve(
+            screen: ScreenFixture.notched14, listContentHeight: threeRows)
+        g = NotchGeometry(
+            displayID: g.displayID,
+            screenFrame: g.screenFrame,
+            hasNotch: g.hasNotch,
+            bandHeight: g.bandHeight,
+            notchRect: g.notchRect,
+            pillRect: g.pillRect,
+            pillContentRect: g.pillContentRect,
+            pillHotRect: g.pillHotRect,
+            showsPill: g.showsPill,
+            leftCapRect: g.leftCapRect,
+            collapsedFrame: g.collapsedFrame,
+            expandedFrame: g.expandedFrame.offsetBy(dx: 40, dy: 0),
+            listHeight: g.listHeight,
+            graceCorridor: g.graceCorridor,
+            menuBarStrip: g.menuBarStrip
+        )
+        let report = NotchGeometryResolver.check(g)
+        #expect(!report.isSatisfied)
+        #expect(report.violations.contains { $0.contains("not centred") })
+    }
+
     @Test("a narrow screen shrinks the panel rather than running off the edge")
     func narrowScreen() {
         // A 900 pt-wide display with a notch: there is not 380 pt of room to the
@@ -527,5 +646,9 @@ struct NotchGeometryTests {
         #expect(NotchGeometryResolver.check(g).isSatisfied)
         #expect(g.expandedFrame.maxX <= cramped.frame.maxX)
         #expect(g.collapsedFrame.maxX <= cramped.frame.maxX)
+        // Centring gave the panel a left edge to run off too, which zero never
+        // used to be a risk for.
+        #expect(g.expandedFrame.minX >= cramped.frame.minX)
+        #expect(g.expandedFrame.contains(g.collapsedFrame))
     }
 }

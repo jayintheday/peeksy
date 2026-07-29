@@ -16,6 +16,16 @@ import SwiftUI
 final class NotchModel {
     var geometry: NotchGeometry
     var phase: NotchPhase = .collapsed
+    /// The window's LIVE committed frame, global y-up.
+    ///
+    /// NOT `geometry.frame(for: phase)`. The expanded panel is centred on the
+    /// notch and the collapsed band is not, so the two no longer share a
+    /// top-left — and `phase` does not say where the window IS: on a collapse
+    /// the phase flips at the START of the animation while the frame shrinks at
+    /// the END, so for ~300 ms the window is still the wide, left-shifted rect.
+    /// `NotchChrome` subtracts this to keep the pill still while the window
+    /// moves underneath it. Mutated OUTSIDE any animation — see `commitFrame`.
+    var windowFrame: CGRect
     /// False while the panel is ordered out. The pill's only animation is gated
     /// on this — see `PillView.breathing`.
     var isVisible = true
@@ -26,6 +36,8 @@ final class NotchModel {
 
     init(geometry: NotchGeometry) {
         self.geometry = geometry
+        // Matches the rect `NotchController.start` hands `NotchPanel(contentRect:)`.
+        self.windowFrame = geometry.collapsedFrame
     }
 }
 
@@ -575,6 +587,15 @@ final class NotchController {
         // display: false and NEVER animate: true. See `expandAnimation`.
         panel.setFrame(frame, display: false)
         hosting.frame = CGRect(origin: .zero, size: frame.size)
+        // The chrome compensates against the LIVE frame, so the publish belongs
+        // HERE — the one place the window ever moves — in the same runloop turn
+        // as the `setFrame` above, or the pill is a frame behind the window it
+        // is drawn in.
+        //
+        // `animation: nil` is mandatory, not defensive: opening the panel steps
+        // the origin ~97 pt left on a 14", and an ambient animation on that
+        // would slide the pill sideways through the camera housing every time.
+        withTransaction(Transaction(animation: nil)) { model?.windowFrame = frame }
         // The mask is stored window-local, so it is stale the instant the frame
         // moves. Recomputing here means the two can never disagree.
         refreshHitMask()

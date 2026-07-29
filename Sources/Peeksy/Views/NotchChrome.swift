@@ -18,6 +18,10 @@ import SwiftUI
 struct NotchChrome: View {
     let geometry: NotchGeometry
     let phase: NotchPhase
+    /// The window's LIVE committed frame — see `NotchModel.windowFrame`. NOT
+    /// `geometry.frame(for: phase)`: during a collapse the phase is already
+    /// `.collapsed` while the window is still the wide, left-shifted rect.
+    let windowFrame: CGRect
     let isVisible: Bool
     let store: SessionStore
     let onPillTap: () -> Void
@@ -34,14 +38,46 @@ struct NotchChrome: View {
         expanded ? geometry.expandedFrame.width : geometry.collapsedFrame.width
     }
 
+    /// Cancels the window's own movement.
+    ///
+    /// The expanded frame is centred on the notch and the collapsed frame is
+    /// not, so the window's top-left steps LEFT to open and back RIGHT to close.
+    /// This offset steps by the same amount in the opposite direction, which
+    /// makes everything below it live in one fixed coordinate space whose origin
+    /// is `collapsedFrame.minX` — the space every other offset in this view is
+    /// already measured in.
+    ///
+    /// It MUST NOT animate. `NotchController.commitFrame` publishes
+    /// `windowFrame` inside `withTransaction(animation: nil)` for that reason:
+    /// animating it would slide the pill sideways across the camera housing on
+    /// every open and close.
+    private var windowCompensation: CGFloat {
+        geometry.collapsedFrame.minX - windowFrame.minX
+    }
+
+    /// Where the panel's left edge sits, in the space `windowCompensation`
+    /// establishes. Negative: the centred panel starts left of the band.
+    /// A CONSTANT — the list is laid out here from frame one and never moves.
+    private var panelX: CGFloat {
+        geometry.expandedFrame.minX - geometry.collapsedFrame.minX
+    }
+
+    /// The unfurl: 0 collapsed, `panelX` open.
+    ///
+    /// The shape grows LEFT out of the band's own x-range by exactly this much
+    /// while its `width` grows past the band's right edge, so the panel opens
+    /// symmetrically about the notch instead of appearing at full width.
+    /// THIS one animates — it is the only horizontal thing that does.
+    private var unfurlX: CGFloat { expanded ? panelX : 0 }
+
     /// Where the pill sits inside the shape.
     ///
     /// Computed through the tested global→SwiftUI conversion rather than by
-    /// hand, and measured against `collapsedFrame` because the collapsed and
-    /// expanded frames share a top-left origin by construction — so this offset
-    /// is phase-independent and the pill provably cannot drift during the
-    /// animation. Its `y` is 0, since the panel top and the pill top are both
-    /// pinned to `screenFrame.maxY`.
+    /// hand, and measured against `collapsedFrame` — which is NOT the window's
+    /// frame any more, but IS the origin of the space `windowCompensation`
+    /// establishes. So this offset stays phase-independent and the pill still
+    /// provably cannot drift during the animation. Its `y` is 0, since the panel
+    /// top and the pill top are both pinned to `screenFrame.maxY`.
     private var pillFrame: CGRect {
         NotchGeometryResolver.swiftUIRect(geometry.pillRect, in: geometry.collapsedFrame)
     }
@@ -73,10 +109,26 @@ struct NotchChrome: View {
 
     var body: some View {
         let shape = UnevenRoundedRectangle(cornerRadii: radii, style: .continuous)
+        // BOTH children carry `-unfurlX`, so the shape is the only thing that
+        // actually travels. That is not a flourish: the shape is the `.background`
+        // of this whole stack, and the pill is painted with a 6% white wash that
+        // is only legible ON that black. Hoisting the pill out of this subtree to
+        // stop it moving takes its backdrop away with it, and it turns into a
+        // near-invisible outline over the wallpaper.
+        //
+        // Note what this collapses to when `unfurlX == 0`: the exact tree that
+        // shipped before centring, offsets and all. The collapsed state cannot
+        // regress, by construction.
         return ZStack(alignment: .topLeading) {
+            // `panelX - unfurlX` holds the list STILL in screen space while the
+            // container slides out from under it, so the text is laid out at its
+            // final position from frame one and the shape's clip does the reveal.
             listContainer
-                .offset(y: geometry.bandHeight)
+                .offset(x: panelX - unfurlX, y: geometry.bandHeight)
+            // And the pill, which must not move at all — it is a fixed landmark
+            // beside a physical notch.
             band
+                .offset(x: -unfurlX)
         }
         .frame(width: width, height: geometry.bandHeight + listHeight, alignment: .topLeading)
         // Literal #000. `FirstMouseHostingView.allowsVibrancy` is false so this
@@ -84,10 +136,19 @@ struct NotchChrome: View {
         // it indistinguishable from the bezel.
         .background(shape.fill(Color.black))
         .clipShape(shape)
+        // The unfurl, paired with the `width` above: the shape's left edge
+        // travels out as its right edge does, so it opens symmetrically about
+        // the notch rather than only rightwards. Every child cancels it.
+        .offset(x: unfurlX)
         // The window is frequently bigger than the shape — always during a
         // collapse, briefly during an expand. Pin to the top-left so the excess
         // is transparent rather than the shape being centred in it.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // OUTSIDE the frame above, and a step rather than an animation: this one
+        // cancels the window's own movement, so everything inside it is laid out
+        // as though the window never moved at all. Kept as a separate modifier
+        // from `unfurlX` precisely so the two cannot share a transaction.
+        .offset(x: windowCompensation)
     }
 
     // MARK: Band
@@ -147,6 +208,7 @@ struct NotchRootView: View {
         NotchChrome(
             geometry: model.geometry,
             phase: model.phase,
+            windowFrame: model.windowFrame,
             isVisible: model.isVisible,
             store: store,
             onPillTap: { model.onPillTap() },

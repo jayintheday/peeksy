@@ -177,7 +177,7 @@ Adding a second agent runtime is an `AgentAdapter` conformance and an
 different wire format in 25 lines.
 
 ```sh
-swift build && swift test      # 508 tests, 50 suites
+swift build && swift test      # 550 tests, 52 suites
 ```
 
 The app icon is generated, not committed: `assets/AppIcon.png` is the 1024×1024

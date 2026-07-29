@@ -399,6 +399,23 @@ enum FocusCLI {
                 for violation in report.violations { print("    \(violation)") }
             }
 
+            // Whether the open panel really is centred, as the two margins a
+            // human would measure with a ruler. Equal means centred; the
+            // `clamped` note means the display was too narrow to manage it and
+            // containment won, which is a correct outcome rather than a bug.
+            let anchor = resolved.hasNotch ? resolved.notchRect : resolved.pillRect
+            let leftMargin = anchor.minX - resolved.expandedFrame.minX
+            let rightMargin = resolved.expandedFrame.maxX - anchor.maxX
+            let m = { (v: CGFloat) in String(format: "%.1f", v) }
+            // Judged on the CENTRE, not on the two margins being bit-identical:
+            // a whole-point origin can leave them a point apart and still be as
+            // centred as the coordinate system allows.
+            let centred = abs(resolved.expandedFrame.midX - anchor.midX)
+                <= NotchGeometryResolver.centringSlack + NotchGeometryResolver.epsilon
+            print("  centring        left \(m(leftMargin)) pt / right \(m(rightMargin)) pt"
+                + "  about \(resolved.hasNotch ? "the notch" : "the pill")"
+                + (centred ? "" : "   CLAMPED — no room to centre"))
+
             // How much menu bar we occupy, in BOTH pill states. This is the
             // number the occlusion bug is measured in, and printing it is what
             // makes "we shrank the footprint" checkable rather than asserted.
@@ -596,7 +613,12 @@ enum FocusCLI {
             lines.append("    "
                 + label.padding(toLength: 22, withPad: " ", startingAt: 0)
                 + core.phase.rawValue.padding(toLength: 11, withPad: " ", startingAt: 0)
-                + String(format: "frame=%.0fx%.0f", frame.width, frame.height)
+                // The x-origin is printed because it MOVES now: the panel is
+                // centred on the notch and the collapsed band is not, so opening
+                // steps the window left. Seeing it step back on the collapse is
+                // the cheapest check that the two frames still agree.
+                + String(format: "frame=%.0f…%.0f %.0fx%.0f",
+                         frame.minX, frame.maxX, frame.width, frame.height)
                 + (effect.isEmpty ? "" : "  → \(effect)"))
         }
 
@@ -647,8 +669,12 @@ enum FocusCLI {
 
         func report(_ label: String) {
             let frame = controller.debugPanelFrame ?? .zero
+            // ONE decimal place, not zero. A window frame that AppKit has
+            // quietly rounded to a whole point differs from the resolved one by
+            // exactly the amount a `%.0f` would hide, and that difference is
+            // what every window-local conversion in the app is built on.
             print(String(
-                format: "  %@ phase=%@ frame=x%.0f y%.0f %.0fx%.0f mask=%d",
+                format: "  %@ phase=%@ frame=x%.1f y%.1f %.1fx%.1f mask=%d",
                 label.padding(toLength: 26, withPad: " ", startingAt: 0),
                 controller.phase.rawValue.padding(toLength: 10, withPad: " ", startingAt: 0),
                 frame.minX, frame.minY, frame.width, frame.height,
