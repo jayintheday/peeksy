@@ -261,7 +261,8 @@ final class SessionStore {
             uiLog.info("""
                 reap: removed \(result.removed.count, privacy: .public) \
                 staled \(result.staled.count, privacy: .public) \
-                permissions expired \(result.permissionsExpired.count, privacy: .public)
+                permissions expired \(result.permissionsExpired.count, privacy: .public) \
+                attention expired \(result.attentionExpired.count, privacy: .public)
                 """)
         }
         if !result.removed.isEmpty {

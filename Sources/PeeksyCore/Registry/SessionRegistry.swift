@@ -12,15 +12,24 @@ public struct ReapResult: Sendable, Equatable {
     public let removed: [String]
     public let staled: [String]
     public let permissionsExpired: [String]
+    /// Rows that stopped claiming to need you. See `ReapPolicy.attentionTTL`.
+    public let attentionExpired: [String]
 
-    public init(removed: [String] = [], staled: [String] = [], permissionsExpired: [String] = []) {
+    public init(
+        removed: [String] = [],
+        staled: [String] = [],
+        permissionsExpired: [String] = [],
+        attentionExpired: [String] = []
+    ) {
         self.removed = removed
         self.staled = staled
         self.permissionsExpired = permissionsExpired
+        self.attentionExpired = attentionExpired
     }
 
     public var isEmpty: Bool {
         removed.isEmpty && staled.isEmpty && permissionsExpired.isEmpty
+            && attentionExpired.isEmpty
     }
 }
 
@@ -306,12 +315,13 @@ public struct SessionRegistry: Sendable {
     /// One housekeeping pass. Idempotent, no timers — the caller drives this
     /// from a 15 s `Timer`.
     ///
-    /// Three jobs, in this order per session:
+    /// Four jobs, in this order per session:
     ///  1. remove: a `.dead` pid idle ≥ `policy.deadGrace`, or an `.unknown` one
     ///     idle ≥ `policy.orphanTTL`. An `.alive` agent is never time-removed,
     ///     however long it has been quiet;
     ///  2. expire: `pendingPermission` older than `policy.permissionTTL`;
-    ///  3. stale: a `.working` session idle ≥ `policy.stale`.
+    ///  3. calm: a `.needsAttention` session idle ≥ `policy.attentionTTL`;
+    ///  4. stale: a `.working` session idle ≥ `policy.stale`.
     ///
     /// Removal short-circuits so a session never reports in two lists at once.
     @discardableResult
@@ -319,6 +329,7 @@ public struct SessionRegistry: Sendable {
         var removed: [String] = []
         var staled: [String] = []
         var permissionsExpired: [String] = []
+        var attentionExpired: [String] = []
 
         for id in sessions.keys.sorted() {
             guard var s = sessions[id] else { continue }
@@ -346,6 +357,24 @@ public struct SessionRegistry: Sendable {
                 }
             }
 
+            // Red is a claim about NOW. Nothing used to retract it: attention was
+            // the one state with no way out but another hook event, so a session
+            // that asked for you yesterday afternoon was still asking this
+            // morning — and a pill that is permanently red is a pill nobody
+            // reads. After this long of total silence we do not know what it
+            // wants, and `.idle` is what "no signal" looks like here. Same rule
+            // the bootstrap rows already follow: a guess must never manufacture
+            // urgency.
+            //
+            // The pending guard is belt and braces — `permissionTTL` is far
+            // shorter, so it has already cleared above — but it says the intent
+            // out loud: a dialog we still believe is open keeps shouting.
+            if s.state == .needsAttention, s.pendingPermission == nil,
+               idle >= policy.attentionTTL {
+                s.state = .idle
+                attentionExpired.append(id)
+            }
+
             if s.state == .working, idle >= policy.stale {
                 s.state = .stale
                 staled.append(id)
@@ -354,7 +383,11 @@ public struct SessionRegistry: Sendable {
             sessions[id] = s
         }
 
-        return ReapResult(removed: removed, staled: staled, permissionsExpired: permissionsExpired)
+        return ReapResult(
+            removed: removed,
+            staled: staled,
+            permissionsExpired: permissionsExpired,
+            attentionExpired: attentionExpired)
     }
 
     // MARK: - Private

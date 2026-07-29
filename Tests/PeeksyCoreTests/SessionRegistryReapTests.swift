@@ -6,7 +6,8 @@ import Testing
 @Suite("SessionRegistry: reaper")
 struct SessionRegistryReapTests {
     private let policy = ReapPolicy(
-        stale: 600, deadGrace: 45, orphanTTL: 600, permissionTTL: 300, scanFreshness: 60)
+        stale: 600, deadGrace: 45, orphanTTL: 600, permissionTTL: 300,
+        attentionTTL: 1800, scanFreshness: 60)
 
     /// A sweep taken at `t0` that saw these pids as agents.
     private func sweep(_ pids: Set<Int32>, at: Date = t0) -> AgentPidScan {
@@ -30,7 +31,94 @@ struct SessionRegistryReapTests {
         #expect(ReapPolicy.default.deadGrace == 45)
         #expect(ReapPolicy.default.orphanTTL == 600)
         #expect(ReapPolicy.default.permissionTTL == 300)
+        #expect(ReapPolicy.default.attentionTTL == 1800)
         #expect(ReapPolicy.default.scanFreshness == 60)
+    }
+
+    // MARK: - Attention decays
+
+    /// The reported bug: two sessions left overnight, one still claiming to need
+    /// you fifteen and a half hours after it last said anything.
+    @Test("attention decays to idle at the boundary, not before")
+    func attentionDecayBoundary() {
+        var r = registry(alive: [1], policy: policy, agents: sweep([1]))
+        r.apply(env("Notification", pid: 1, notificationType: "idle_prompt"), now: t0)
+        #expect(r["s1"]?.state == .needsAttention)
+
+        #expect(reap(&r, at: t0.addingTimeInterval(1799), agents: [1]).attentionExpired.isEmpty)
+        #expect(r["s1"]?.state == .needsAttention)
+
+        let result = reap(&r, at: t0.addingTimeInterval(1800), agents: [1])
+        #expect(result.attentionExpired == ["s1"])
+        #expect(r["s1"]?.state == .idle)
+    }
+
+    /// The point of the whole change: the PILL stops shouting, not just the row.
+    @Test("a decayed session stops counting toward the pill's red")
+    func decayClearsTheAggregate() {
+        var r = registry(alive: [1], policy: policy, agents: sweep([1]))
+        r.apply(env("Notification", pid: 1, notificationType: "idle_prompt"), now: t0)
+        #expect(r.aggregate().attentionCount == 1)
+        #expect(r.aggregate().top == .needsAttention)
+
+        reap(&r, at: t0.addingTimeInterval(1800), agents: [1])
+
+        #expect(r.aggregate().attentionCount == 0)
+        #expect(r.aggregate().top == .idle)
+    }
+
+    @Test("a live pending permission keeps shouting, whatever the clock says")
+    func aLivePendingHoldsTheRed() {
+        // permissionTTL is far shorter than attentionTTL, so by the time the
+        // decay is due the pending has already gone — but a policy where it had
+        // not must not calm a dialog we still believe is open.
+        let holding = ReapPolicy(
+            stale: 600, deadGrace: 45, orphanTTL: 600, permissionTTL: 9_000,
+            attentionTTL: 1800, scanFreshness: 60)
+        var r = registry(alive: [1], policy: holding, agents: sweep([1]))
+        r.apply(env("PermissionRequest", pid: 1, permissionRequestID: "req-1"), now: t0)
+
+        let result = reap(&r, at: t0.addingTimeInterval(1800), agents: [1])
+
+        #expect(result.attentionExpired.isEmpty)
+        #expect(r["s1"]?.state == .needsAttention)
+    }
+
+    @Test("a permission whose pending already expired does decay")
+    func expiredPendingThenDecays() {
+        var r = registry(alive: [1], policy: policy, agents: sweep([1]))
+        r.apply(env("PermissionRequest", pid: 1, permissionRequestID: "req-1"), now: t0)
+
+        // One pass, at 1800: the pending expires (300) and the state calms
+        // (1800) in the same iteration, in that order.
+        let result = reap(&r, at: t0.addingTimeInterval(1800), agents: [1])
+
+        #expect(result.permissionsExpired == ["s1"])
+        #expect(result.attentionExpired == ["s1"])
+        #expect(r["s1"]?.state == .idle)
+    }
+
+    @Test("anything the session says puts the clock back to zero")
+    func activityRestartsTheClock() {
+        var r = registry(alive: [1], policy: policy, agents: sweep([1]))
+        r.apply(env("Notification", pid: 1, notificationType: "idle_prompt"), now: t0)
+        // 29 minutes later you still have not answered, and it asks again.
+        r.apply(env("Notification", pid: 1, notificationType: "idle_prompt"),
+                now: t0.addingTimeInterval(1740))
+
+        // 1800 from the FIRST ask, but only 60 from the second.
+        #expect(reap(&r, at: t0.addingTimeInterval(1800), agents: [1]).attentionExpired.isEmpty)
+        #expect(r["s1"]?.state == .needsAttention)
+    }
+
+    @Test("decay is idempotent — an idle session is not calmed twice")
+    func decayIsIdempotent() {
+        var r = registry(alive: [1], policy: policy, agents: sweep([1]))
+        r.apply(env("Notification", pid: 1, notificationType: "idle_prompt"), now: t0)
+        let first = reap(&r, at: t0.addingTimeInterval(1800), agents: [1])
+        let second = reap(&r, at: t0.addingTimeInterval(1801), agents: [1])
+        #expect(first.attentionExpired == ["s1"])
+        #expect(second.isEmpty)
     }
 
     @Test("a working session goes stale exactly at the boundary, not before")

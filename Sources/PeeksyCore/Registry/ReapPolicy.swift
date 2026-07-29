@@ -26,6 +26,14 @@ public struct ReapPolicy: Sendable, Equatable {
     /// A `pendingPermission` older than this is cleared. Backstop for the
     /// dialog that was answered somewhere we cannot observe.
     public var permissionTTL: TimeInterval
+    /// A `.needsAttention` session silent for this long falls back to `.idle`.
+    ///
+    /// Red is a claim about NOW — "stop what you are doing". Nothing used to
+    /// retract it, so a session that asked for you yesterday afternoon was still
+    /// asking the next morning, and a pill that is permanently red is a pill
+    /// nobody looks at. Longer than `stale` on purpose: a permission prompt you
+    /// are still thinking about should keep shouting.
+    public var attentionTTL: TimeInterval
     /// An `AgentPidScan` older than this is ignored. A scan that failed or
     /// never ran must never be read as "none of these pids are agents".
     public var scanFreshness: TimeInterval
@@ -35,12 +43,14 @@ public struct ReapPolicy: Sendable, Equatable {
         deadGrace: TimeInterval = 45,
         orphanTTL: TimeInterval = 10 * 60,
         permissionTTL: TimeInterval = 5 * 60,
+        attentionTTL: TimeInterval = 30 * 60,
         scanFreshness: TimeInterval = 60
     ) {
         self.stale = stale
         self.deadGrace = deadGrace
         self.orphanTTL = orphanTTL
         self.permissionTTL = permissionTTL
+        self.attentionTTL = attentionTTL
         self.scanFreshness = scanFreshness
     }
 
