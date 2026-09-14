@@ -17,7 +17,7 @@ public enum AgentHookConfiguration: String, CaseIterable, Sendable, Identifiable
     }
     public var instructions: String {
         self == .codex
-            ? "Open /hooks in Codex and review and trust the Peeksy hooks. Restart existing sessions if needed. Registered hooks cannot report activity until trusted."
+            ? "Codex skips registered hooks until you trust them: open /hooks in Codex and trust the Peeksy hooks. A session trusted mid-run reports from its next prompt; sessions started before this install need restarting. `--doctor` shows what Codex has recorded."
             : "New Claude Code sessions pick this up automatically. Restart existing sessions, or use /hooks to reload."
     }
     public func scriptURL(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
@@ -28,13 +28,23 @@ public enum AgentHookConfiguration: String, CaseIterable, Sendable, Identifiable
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         guard self == .codex else { return SupportPaths.claudeSettings(home: home) }
-        let root: URL
+        return codexHome(home: home, environment: environment).appendingPathComponent("hooks.json")
+    }
+    /// `$CODEX_HOME/config.toml` — where Codex keeps its hook trust records.
+    /// Read by `--doctor` through `CodexHookTrust`; never written. `nil` for
+    /// any agent but Codex.
+    public func trustRecordURL(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        guard self == .codex else { return nil }
+        return codexHome(home: home, environment: environment).appendingPathComponent("config.toml")
+    }
+    private func codexHome(home: URL, environment: [String: String]) -> URL {
         if let path = environment["CODEX_HOME"], !path.isEmpty {
-            root = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-        } else {
-            root = home.appendingPathComponent(".codex")
+            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         }
-        return root.appendingPathComponent("hooks.json")
+        return home.appendingPathComponent(".codex")
     }
     public func installer(settings: URL? = nil, command: String? = nil) -> HookInstaller {
         HookInstaller(settingsURL: settings ?? settingsURL(),

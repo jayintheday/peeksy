@@ -260,6 +260,49 @@ public enum SettingsMerge {
         let ownership: Ownership
     }
 
+    /// Where one of our hooks sits under its event: the group's index in the
+    /// event's array, and the entry's index within that group.
+    public struct Position: Equatable, Sendable {
+        public let group: Int
+        public let hook: Int
+        public init(group: Int, hook: Int) {
+            self.group = group
+            self.hook = hook
+        }
+    }
+
+    /// Our registration's coordinates under each event.
+    ///
+    /// Codex keys its trust record by exactly this pair, so it has to be OUR
+    /// entry's — the installer appends, so behind two foreign groups ours is
+    /// `2:0`, and in a group somebody else shares with us it may not be entry
+    /// `0`. Events with no registration are absent. Read-only; a settings file
+    /// the merge would refuse yields nothing rather than a guess.
+    public static func positions(
+        in settings: [String: Any],
+        command: String,
+        events: [HookEventSpec] = HookSpec.events,
+        source: AgentSource = .claudeCode
+    ) -> [String: Position] {
+        var found: [String: Position] = [:]
+        guard let hooks = try? hooksObject(in: settings) else { return found }
+        for spec in events {
+            guard let groups = try? groupArray(in: hooks, event: spec.event),
+                  let owned = try? ourGroup(in: groups, event: spec.event, command: command, source: source),
+                  let entries = owned.group[HookSpec.hooksKey] as? [Any]
+            else { continue }
+            for (index, raw) in entries.enumerated() {
+                guard let hook = raw as? [String: Any],
+                      let stored = hook[HookSpec.commandKey] as? String,
+                      HookSpec.isOurCommand(stored, desired: command, source: source)
+                else { continue }
+                found[spec.event] = Position(group: owned.index, hook: index)
+                break
+            }
+        }
+        return found
+    }
+
     /// First group containing our command, with how much of it is ours.
     ///
     /// Validates every entry on the way past — not just up to the match — so a
