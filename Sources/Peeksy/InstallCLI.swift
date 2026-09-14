@@ -32,7 +32,9 @@ enum InstallCLI {
     private struct Options {
         var yes = false
         var dryRun = false
-        var settingsURL = SupportPaths.claudeSettings()
+        var agent: AgentHookConfiguration = .claudeCode
+        var settingsOverride: URL?
+        var settingsURL: URL { settingsOverride ?? agent.settingsURL() }
         /// `nil` means "the standard ~/.peeksy path, synced from the bundle".
         var hookPath: String?
     }
@@ -46,11 +48,18 @@ enum InstallCLI {
                 options.yes = true
             case "--dry-run":
                 options.dryRun = true
+            case "--agent":
+                guard let value = value(after: index, in: arguments),
+                      let agent = AgentHookConfiguration(rawValue: value) else {
+                    return .failure(Complaint(description: "--agent must be claude-code or codex"))
+                }
+                options.agent = agent
+                index += 1
             case "--settings":
                 guard let value = value(after: index, in: arguments) else {
                     return .failure(Complaint(description: "--settings needs a path"))
                 }
-                options.settingsURL = URL(fileURLWithPath: (value as NSString).expandingTildeInPath)
+                options.settingsOverride = URL(fileURLWithPath: (value as NSString).expandingTildeInPath)
                 index += 1
             case "--hook-path":
                 guard let value = value(after: index, in: arguments) else {
@@ -88,7 +97,7 @@ enum InstallCLI {
         // `--hook-path` names a script the caller manages; anything else is the
         // copy in ~/.peeksy that we own and keep in step with the bundle.
         let managingScript = options.hookPath == nil && action == .install
-        let command = HookSpec.shellQuoted(options.hookPath ?? SupportPaths.hookScript().path)
+        let command = HookSpec.shellQuoted(options.hookPath ?? options.agent.scriptURL().path)
 
         print("Peeksy — \(action.rawValue) hook")
         print("")
@@ -99,7 +108,7 @@ enum InstallCLI {
         }
         print("")
 
-        let installer = HookInstaller(settingsURL: options.settingsURL, command: command)
+        let installer = options.agent.installer(settings: options.settingsURL, command: command)
 
         let preview: HookInstallPreview
         do {
@@ -119,7 +128,13 @@ enum InstallCLI {
         print("")
 
         guard !preview.isNoOp else {
-            print("Nothing to do.")
+            if managingScript && !options.dryRun {
+                if case let .failure(complaint) = syncScript(to: options.agent.scriptURL(), agent: options.agent) {
+                    return fail(complaint.description)
+                }
+            }
+            print("No configuration changes needed.")
+            if action == .install { print(options.agent.instructions) }
             return 0
         }
 
@@ -142,7 +157,7 @@ enum InstallCLI {
         // a hook error on the user's very next turn.
         var scriptOutcome: HookScriptSync.Outcome?
         if managingScript {
-            switch syncScript(to: SupportPaths.hookScript()) {
+            switch syncScript(to: options.agent.scriptURL(), agent: options.agent) {
             case let .success(outcome): scriptOutcome = outcome
             case let .failure(complaint): return fail(complaint.description)
             }
@@ -156,8 +171,7 @@ enum InstallCLI {
             if let backup { print("  backup     \(backup.path)") }
             print("")
             if action == .install {
-                print("New Claude Code sessions pick this up automatically. A session that is")
-                print("already running needs to be restarted, or `/hooks` to reload.")
+                print(options.agent.instructions)
             }
             return 0
         } catch {
@@ -177,13 +191,13 @@ enum InstallCLI {
         case let .failure(complaint): return usage(complaint.description)
         }
 
-        let command = HookSpec.shellQuoted(options.hookPath ?? SupportPaths.hookScript().path)
+        let command = HookSpec.shellQuoted(options.hookPath ?? options.agent.scriptURL().path)
         do {
             // OUR block only — never the merged file. See `HookSpec.snippet`.
             // It follows that this path no longer reads settings.json at all,
             // so it cannot fail on a settings file that is missing or broken,
             // which is exactly when somebody reaches for this flag.
-            print(try SettingsIO.canonicalText(HookSpec.snippet(command: command)), terminator: "")
+            print(try SettingsIO.canonicalText(HookSpec.snippet(command: command, events: options.agent.events)), terminator: "")
             return 0
         } catch {
             return fail(describe(error))
@@ -192,10 +206,10 @@ enum InstallCLI {
 
     // MARK: - Script location
 
-    static func syncScript(to destination: URL) -> Result<HookScriptSync.Outcome, Complaint> {
-        guard let source = bundledHookURL() else {
+    static func syncScript(to destination: URL, agent: AgentHookConfiguration = .claudeCode) -> Result<HookScriptSync.Outcome, Complaint> {
+        guard let source = bundledHookURL(agent: agent) else {
             return .failure(Complaint(description: """
-                cannot find \(SupportPaths.bundledHookName). Build the app bundle first:
+                cannot find \(agent.scriptName). Build the app bundle first:
                   ./scripts/build_app.sh
                 """))
         }
@@ -212,11 +226,11 @@ enum InstallCLI {
     /// so walk up from the executable looking for the repo's `hooks/` directory
     /// — a developer running `swift run --install-hook` should not be told to
     /// build a bundle first.
-    static func bundledHookURL() -> URL? {
+    static func bundledHookURL(agent: AgentHookConfiguration = .claudeCode) -> URL? {
         let fm = FileManager.default
 
         if let resources = Bundle.main.resourceURL {
-            let candidate = resources.appendingPathComponent(SupportPaths.bundledHookName)
+            let candidate = resources.appendingPathComponent(agent.scriptName)
             if fm.fileExists(atPath: candidate.path) { return candidate }
         }
 
@@ -225,7 +239,7 @@ enum InstallCLI {
             guard let current = directory else { break }
             let candidate = current
                 .appendingPathComponent("hooks")
-                .appendingPathComponent(SupportPaths.bundledHookName)
+                .appendingPathComponent(agent.scriptName)
             if fm.fileExists(atPath: candidate.path) { return candidate }
             directory = current.deletingLastPathComponent()
         }
@@ -251,7 +265,7 @@ enum InstallCLI {
         """
         You can install by hand instead — this prints the block to merge into
         the "hooks" object of \(options.settingsURL.lastPathComponent):
-          Peeksy --print-hook-json
+          Peeksy --print-hook-json --agent \(options.agent.rawValue)
         """
     }
 
@@ -282,7 +296,7 @@ enum InstallCLI {
     private static func usage(_ message: String) -> Int32 {
         printErr("error: \(message)")
         printErr("")
-        printErr("usage:")
+        printErr("usage (all modes accept --agent claude-code|codex; default claude-code):")
         printErr("  Peeksy --install-hook   [--yes] [--dry-run] [--settings PATH] [--hook-path PATH]")
         printErr("  Peeksy --uninstall-hook [--yes] [--dry-run] [--settings PATH]")
         printErr("  Peeksy --print-hook-json            [--hook-path PATH]")

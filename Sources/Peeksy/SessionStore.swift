@@ -79,7 +79,9 @@ final class SessionStore {
 
     /// Drives the "Hook not installed" line. Re-probed on the reap tick so
     /// installing the hook while the app runs clears the message.
-    private(set) var hookInstalled = HookProbe.isInstalled()
+    private(set) var claudeHookInstalled = HookProbe.isInstalled()
+    private(set) var codexHookInstalled = AgentHookConfiguration.codex.installer().isInstalled()
+    var hookInstalled: Bool { claudeHookInstalled || codexHookInstalled }
 
     /// pid → owning application. Cached because the answer cannot change for a
     /// live pid and the lookup walks the process tree. Resolved for every
@@ -167,7 +169,7 @@ final class SessionStore {
         activator: any AppActivating,
         ownerLookup: @escaping @Sendable (Int32) -> OwningApp?,
         titleReader: TranscriptTitleReader = .system,
-        pidScanner: @escaping @Sendable () -> Set<Int32>? = { ProcessScanner().liveAgentPids() }
+        pidScanner: @escaping @Sendable () -> Set<Int32>? = { ProcessScanner().liveAgentPids(names: AgentRegistry.processNames) }
     ) {
         self.registry = registry
         self.focuser = focuser
@@ -187,8 +189,8 @@ final class SessionStore {
             // The envelope carries the transcript path but never the title
             // itself; reading it is deferred to the reaper. A per-event read is
             // not an option — one captured session produced 281 events.
-            if let path = envelope.transcriptPath, !path.isEmpty {
-                transcriptPaths[envelope.sessionID] = path
+            if envelope.source == .claudeCode, let path = envelope.transcriptPath, !path.isEmpty {
+                transcriptPaths[envelope.key] = path
             }
         case let .removed(id):
             forgetTitle(id)
@@ -221,8 +223,8 @@ final class SessionStore {
     /// hook event that beats the scan wins on the merits: `seed` skips any pid
     /// or tty already tracked, and the rows it does create are `.bootstrap`,
     /// which the list renders as "waiting…" rather than inventing a state.
-    func bootstrap(_ found: [DiscoveredProcess]) {
-        let created = registry.seed(found, source: .claudeCode, now: Date())
+    func bootstrap(_ found: [DiscoveredProcess], source: AgentSource = .claudeCode) {
+        let created = registry.seed(found, source: source, now: Date())
         guard !created.isEmpty else { return }
         uiLog.info("cold start: adopted \(created.count, privacy: .public) running session(s)")
         publish()
@@ -269,7 +271,8 @@ final class SessionStore {
             for id in result.removed { forgetTitle(id) }
             pruneOwnerCache()
         }
-        hookInstalled = HookProbe.isInstalled()
+        claudeHookInstalled = HookProbe.isInstalled()
+        codexHookInstalled = AgentHookConfiguration.codex.installer().isInstalled()
         refreshTitles()
         publish()
         // The notch hangs its menu-bar re-measurement off this tick rather than
@@ -331,16 +334,16 @@ final class SessionStore {
         let now = Date()
         var due: [(id: String, path: String)] = []
         for session in registry.ordered() {
-            guard let path = transcriptPaths[session.id] else { continue }
-            if let readAt = titleReadAt[session.id] {
+            guard let path = transcriptPaths[session.key] else { continue }
+            if let readAt = titleReadAt[session.key] {
                 guard session.updatedAt > readAt else { continue }
-                if taskTitles[session.id] != nil,
+                if taskTitles[session.key] != nil,
                    now.timeIntervalSince(readAt) < titleRefreshInterval { continue }
             }
             // Stamped BEFORE the read, not after, so a transcript that has no
             // title yet is not retried until the session does something else.
-            titleReadAt[session.id] = now
-            due.append((session.id, path))
+            titleReadAt[session.key] = now
+            due.append((session.key, path))
         }
         guard !due.isEmpty else { return }
 
@@ -361,7 +364,7 @@ final class SessionStore {
 
     private func applyTitles(_ resolved: [(String, String)]) {
         var changed = false
-        for (id, title) in resolved where taskTitles[id] != title {
+        for (id, title) in resolved where registry.sessions[id] != nil && taskTitles[id] != title {
             // Logged because the title comes from a file this app does not own,
             // in an undocumented format, and "the row still says the project" is
             // otherwise indistinguishable from "the transcript has no title yet".
@@ -396,9 +399,9 @@ final class SessionStore {
     /// Unlike `focus`, the panel deliberately stays open: clearing several dead
     /// rows in a row is the whole use case.
     func dismiss(_ session: Session) {
-        guard registry.remove(id: session.id) else { return }
+        guard registry.remove(id: session.id, source: session.source) else { return }
         uiLog.info("dismissed \(session.id, privacy: .public)")
-        forgetTitle(session.id)
+        forgetTitle(session.key)
         pruneOwnerCache()
         publish()
     }

@@ -25,6 +25,11 @@ public struct HookEnvelope: Sendable, Equatable {
     public let pid: Int32?
     /// Normalised to bare `"ttys003"`.
     public let tty: String?
+    public var key: String { Session.key(source: source, id: sessionID) }
+    public let turnID: String?
+    public let toolUseID: String?
+    /// True only for a verified, dedicated terminal process.
+    public let dedicatedProcess: Bool?
     public let receivedAt: Date
 
     /// Notification subtypes that mean "a human is needed".
@@ -47,7 +52,10 @@ public struct HookEnvelope: Sendable, Equatable {
         permissionRequestID: String? = nil,
         pid: Int32? = nil,
         tty: String? = nil,
-        receivedAt: Date
+        receivedAt: Date,
+        turnID: String? = nil,
+        toolUseID: String? = nil,
+        dedicatedProcess: Bool? = nil
     ) {
         self.source = source
         self.sessionID = sessionID
@@ -62,5 +70,8 @@ public struct HookEnvelope: Sendable, Equatable {
         self.pid = pid
         self.tty = tty
         self.receivedAt = receivedAt
+        self.turnID = turnID
+        self.toolUseID = toolUseID
+        self.dedicatedProcess = dedicatedProcess
     }
 }

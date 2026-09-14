@@ -1,13 +1,13 @@
 import Foundation
 
-/// What `apply` did.
+/// What `apply` did. Updated/removed values are source-qualified Session.key values.
 public enum ApplyResult: Sendable, Equatable {
     case updated(String)
     case removed(String)
     case dropped(reason: String)
 }
 
-/// What one `reap` pass did. Empty when nothing changed, which is the common case.
+/// Source-qualified keys affected by a reap pass. Empty when nothing changed.
 public struct ReapResult: Sendable, Equatable {
     public let removed: [String]
     public let staled: [String]
@@ -69,7 +69,9 @@ public struct Aggregate: Sendable, Equatable {
 /// There is deliberately no timer in here. `reap(now:)` is idempotent and the
 /// caller drives it.
 public struct SessionRegistry: Sendable {
+    /// Storage is keyed by Session.key; use the subscript for native ID lookup.
     public private(set) var sessions: [String: Session]
+    private var endedCodexSessions: Set<String> = []
     public var policy: ReapPolicy
     public var isPidAlive: PidLiveness
     /// Which live pids are actually agent processes. Refreshed off the main
@@ -90,7 +92,9 @@ public struct SessionRegistry: Sendable {
 
     // MARK: - Reads (pure)
 
-    public subscript(id: String) -> Session? { sessions[id] }
+    public subscript(id: String, source source: AgentSource = .claudeCode) -> Session? {
+        sessions[Session.key(source: source, id: id)]
+    }
 
     /// Display order: needsAttention → stale → working → done → idle. Within a
     /// tier, hook-truth before bootstrap guesses, then most-recent `updatedAt`
@@ -103,7 +107,7 @@ public struct SessionRegistry: Sendable {
             if pa != pb { return pa > pb }
             if a.origin != b.origin { return a.origin == .hook }
             if a.updatedAt != b.updatedAt { return a.updatedAt > b.updatedAt }
-            return a.id < b.id
+            return a.key < b.key
         }
     }
 
@@ -138,22 +142,37 @@ public struct SessionRegistry: Sendable {
     /// upgraded rather than duplicated.
     @discardableResult
     public mutating func apply(_ e: HookEnvelope, now: Date) -> ApplyResult {
-        let id = e.sessionID
-        guard !id.isEmpty else { return .dropped(reason: "empty session id") }
+        let id = e.key
+        guard !e.sessionID.isEmpty else { return .dropped(reason: "empty session id") }
 
+        if e.source == .codex, endedCodexSessions.contains(id) {
+            guard ["SessionStart", "UserPromptSubmit"].contains(e.hookEventName) else {
+                return .dropped(reason: "late event for ended Codex session")
+            }
+            endedCodexSessions.remove(id)
+        }
         if sessions[id] == nil {
             // May be the first real event from a process we seeded at launch.
-            _ = adopt(realID: id, pid: e.pid, tty: e.tty, now: now)
+            _ = adopt(realID: e.sessionID, pid: e.pid, tty: e.tty, now: now, source: e.source)
         }
 
         var s = sessions[id] ?? Session(
-            id: id,
+            id: e.sessionID,
             source: e.source,
             state: .idle,
             origin: .hook,
             updatedAt: now,
             createdAt: now
         )
+
+        // Codex turn IDs fence delayed progress after completion. Turnless
+        // lifecycle events still apply, and a new turn remains independent.
+        if e.source == .codex, let turn = e.turnID,
+           s.completedTurnIDs.contains(turn),
+           !["Stop", "Interrupt", "SessionEnd", "UserPromptSubmit"].contains(e.hookEventName) {
+            return .dropped(reason: "late event for completed Codex turn")
+        }
+        if let dedicated = e.dedicatedProcess { s.dedicatedProcess = dedicated }
 
         // A hook event is hook-truth. Whatever this row used to be, it is real now.
         s.origin = .hook
@@ -168,6 +187,17 @@ public struct SessionRegistry: Sendable {
         if let tty = e.tty { s.tty = tty }
         if let pid = e.pid { s.pid = pid }
         if let toolSummary = e.toolSummary { s.lastToolSummary = toolSummary }
+
+        if e.source == .codex {
+            applyCodex(e, to: &s, now: now)
+            if e.hookEventName == "SessionEnd" {
+                endedCodexSessions.insert(id)
+                sessions.removeValue(forKey: id)
+                return .removed(id)
+            }
+            sessions[id] = s
+            return .updated(id)
+        }
 
         switch e.hookEventName {
         case "SessionStart":
@@ -213,8 +243,8 @@ public struct SessionRegistry: Sendable {
     /// the session itself will not re-assert. A live agent's next hook event
     /// re-registers it through `apply` with its real state intact.
     @discardableResult
-    public mutating func remove(id: String) -> Bool {
-        sessions.removeValue(forKey: id) != nil
+    public mutating func remove(id: String, source: AgentSource = .claudeCode) -> Bool {
+        sessions.removeValue(forKey: Session.key(source: source, id: id)) != nil
     }
 
     /// Seed from a launch-time process scan.
@@ -225,15 +255,16 @@ public struct SessionRegistry: Sendable {
     public mutating func seed(_ found: [DiscoveredProcess], source: AgentSource, now: Date) -> [String] {
         var created: [String] = []
         for process in found {
-            if sessions.values.contains(where: { $0.pid == process.pid }) { continue }
+            if sessions.values.contains(where: { $0.source == source && $0.pid == process.pid }) { continue }
             if let tty = bareTTY(process.tty),
-               sessions.values.contains(where: { bareTTY($0.tty) == tty }) { continue }
+               sessions.values.contains(where: { $0.source == source && bareTTY($0.tty) == tty }) { continue }
 
-            let id = "boot:\(process.pid)"
+            let rawID = "boot:\(process.pid)"
+            let id = Session.key(source: source, id: rawID)
             guard sessions[id] == nil else { continue }
 
             sessions[id] = Session(
-                id: id,
+                id: rawID,
                 source: source,
                 cwd: process.cwd,
                 tty: bareTTY(process.tty),
@@ -244,7 +275,8 @@ public struct SessionRegistry: Sendable {
                 updatedAt: now,
                 createdAt: now
             )
-            created.append(id)
+            sessions[id]?.dedicatedProcess = source == .codex ? true : nil
+            created.append(rawID)
         }
         return created
     }
@@ -258,22 +290,23 @@ public struct SessionRegistry: Sendable {
     /// Returns the placeholder id that was consumed, or `nil` when there was
     /// nothing to adopt.
     @discardableResult
-    public mutating func adopt(realID: String, pid: Int32?, tty: String?, now: Date) -> String? {
-        guard !realID.isEmpty, sessions[realID] == nil else { return nil }
+    public mutating func adopt(realID: String, pid: Int32?, tty: String?, now: Date, source: AgentSource = .claudeCode) -> String? {
+        let key = Session.key(source: source, id: realID)
+        guard !realID.isEmpty, sessions[key] == nil else { return nil }
 
         let wantedTTY = bareTTY(tty)
         var placeholder: Session?
 
         if let pid {
-            placeholder = candidates.first { $0.pid == pid }
+            placeholder = candidates.first { $0.source == source && $0.pid == pid }
         }
         if placeholder == nil, let wantedTTY {
-            placeholder = candidates.first { bareTTY($0.tty) == wantedTTY }
+            placeholder = candidates.first { $0.source == source && bareTTY($0.tty) == wantedTTY }
         }
         guard let found = placeholder else { return nil }
 
-        sessions.removeValue(forKey: found.id)
-        sessions[realID] = Session(
+        sessions.removeValue(forKey: found.key)
+        sessions[key] = Session(
             id: realID,
             source: found.source,
             cwd: found.cwd,
@@ -286,6 +319,7 @@ public struct SessionRegistry: Sendable {
             pendingPermission: found.pendingPermission,
             lastToolSummary: found.lastToolSummary
         )
+        sessions[key]?.dedicatedProcess = found.dedicatedProcess
         return found.id
     }
 
@@ -306,6 +340,7 @@ public struct SessionRegistry: Sendable {
     func liveness(of session: Session, now: Date) -> PidStatus {
         guard let pid = session.pid, pid > 0 else { return .unknown }
         guard isPidAlive(pid) else { return .dead }
+        if session.source == .codex && session.dedicatedProcess != true { return .unknown }
         guard let scan = agentPidScan,
               max(0, now.timeIntervalSince(scan.at)) < policy.scanFreshness
         else { return .alive }
@@ -349,10 +384,19 @@ public struct SessionRegistry: Sendable {
                 break
             }
 
-            if let pending = s.pendingPermission {
+            if s.source == .codex {
+                let before = s.pendingPermissions.count
+                s.pendingPermissions = s.pendingPermissions.filter {
+                    max(0, now.timeIntervalSince($0.value.receivedAt)) < policy.permissionTTL
+                }
+                s.pendingPermission = oldestPermission(in: s)
+                if before != s.pendingPermissions.count { permissionsExpired.append(id) }
+            }
+            if s.source != .codex, let pending = s.pendingPermission {
                 let age = max(0, now.timeIntervalSince(pending.receivedAt))
                 if age >= policy.permissionTTL {
                     s.pendingPermission = nil
+                    s.pendingPermissions.removeAll()
                     permissionsExpired.append(id)
                 }
             }
@@ -391,6 +435,56 @@ public struct SessionRegistry: Sendable {
     }
 
     // MARK: - Private
+
+    /// Permission hooks may omit a call ID. In that case only completion of
+    /// the same described tool clears the request; unrelated parallel work
+    /// must not turn a waiting session green.
+    private func applyCodex(_ e: HookEnvelope, to s: inout Session, now: Date) {
+        func permissionKey() -> String {
+            e.toolUseID ?? e.toolDetail ?? e.toolSummary ?? e.toolName ?? "permission"
+        }
+        switch e.hookEventName {
+        case "SessionStart":
+            if s.turnID == nil { s.state = .idle }
+        case "UserPromptSubmit":
+            s.turnID = e.turnID
+            if let turn = e.turnID { s.completedTurnIDs.remove(turn) }
+            s.pendingPermissions.removeAll()
+            s.state = .working
+        case "PermissionRequest":
+            s.turnID = e.turnID ?? s.turnID
+            s.pendingPermissions[permissionKey()] = PendingPermission(
+                requestID: e.permissionRequestID ?? permissionKey(),
+                toolName: e.toolName ?? "", summary: e.toolSummary ?? "Permission requested",
+                detail: e.toolDetail ?? "Permission requested", receivedAt: now)
+            s.state = .needsAttention
+        case "PreToolUse", "PostToolUse":
+            s.turnID = e.turnID ?? s.turnID
+            if e.hookEventName == "PostToolUse" {
+                s.pendingPermissions.removeValue(forKey: permissionKey())
+                // PermissionRequest currently often has no tool_use_id.
+                if let description = e.toolDetail ?? e.toolSummary {
+                    s.pendingPermissions.removeValue(forKey: description)
+                }
+            }
+            s.state = s.pendingPermissions.isEmpty ? .working : .needsAttention
+        case "Stop", "Interrupt":
+            if let turn = e.turnID { s.completedTurnIDs.insert(turn) }
+            // A delayed finish for an earlier turn cannot finish the current one.
+            if let turn = e.turnID, let current = s.turnID, turn != current { break }
+            s.pendingPermissions.removeAll()
+            s.state = e.hookEventName == "Interrupt" ? .idle : .done
+        default: break
+        }
+        s.pendingPermission = oldestPermission(in: s)
+    }
+
+    private func oldestPermission(in s: Session) -> PendingPermission? {
+        s.pendingPermissions.values.sorted {
+            if $0.receivedAt != $1.receivedAt { return $0.receivedAt < $1.receivedAt }
+            return $0.requestID < $1.requestID
+        }.first
+    }
 
     /// Bootstrap placeholders, in a deterministic order. Sorted because two
     /// placeholders can share a tty (a shell that respawned an agent) and a

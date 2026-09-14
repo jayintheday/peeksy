@@ -194,6 +194,7 @@ struct NotchPanelView: View {
             ) {
                 loginItem = LoginItem.setEnabled(loginItem != .enabled)
             }
+            settingsControl(id: "hooks", text: "Agent hooks…", emphasised: false) { onInstallHook() }
             settingsControl(id: "quit", text: "Quit", emphasised: false) {
                 // No teardown to do here first. `applicationWillTerminate` stops
                 // the notch, the reaper and the server — and the server unlinks
@@ -362,7 +363,7 @@ struct NotchPanelView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.7))
             if !store.hookInstalled {
-                Text("Claude Code is not reporting to Peeksy yet.")
+                Text("Your agents are not reporting to Peeksy yet.")
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.45))
                     .lineLimit(1)

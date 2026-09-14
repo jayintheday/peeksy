@@ -56,7 +56,7 @@ public struct BuildInfo: Sendable, Equatable {
     /// place in the codebase this string is written — `build_app.sh` passes its
     /// own `VERSION` through the plist, so the two cannot silently disagree
     /// about a build that IS stamped.
-    public static let fallbackVersion = "0.1.0"
+    public static let fallbackVersion = "0.2.0"
 
     /// Parse an `Info.plist` dictionary. Anything missing degrades; nothing throws.
     public static func from(infoDictionary: [String: Any]?) -> BuildInfo {
@@ -83,9 +83,9 @@ public struct BuildInfo: Sendable, Equatable {
 
     /// One token, for `/v1/health` and anywhere else that wants it inline.
     ///
-    ///     0.1.0+dcb9111          committed
-    ///     0.1.0+dcb9111.dirty    built over uncommitted work
-    ///     0.1.0+dev              not stamped
+    ///     0.2.0+dcb9111          committed
+    ///     0.2.0+dcb9111.dirty    built over uncommitted work
+    ///     0.2.0+dev              not stamped
     public var short: String {
         guard let commit else { return "\(marketingVersion)+dev" }
         return "\(marketingVersion)+\(commit)\(dirty ? ".dirty" : "")"

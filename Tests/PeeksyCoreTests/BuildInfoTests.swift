@@ -10,7 +10,7 @@ import Testing
 struct BuildInfoTests {
 
     private func plist(
-        version: Any? = "0.1.0", commit: Any? = nil, dirty: Any? = nil, builtAt: Any? = nil
+        version: Any? = "0.2.0", commit: Any? = nil, dirty: Any? = nil, builtAt: Any? = nil
     ) -> [String: Any] {
         var info: [String: Any] = [:]
         if let version { info[BuildInfo.Key.marketingVersion] = version }
@@ -27,7 +27,7 @@ struct BuildInfoTests {
         let info = BuildInfo.from(infoDictionary: nil)
         #expect(info == .unstamped)
         #expect(info.commit == nil)
-        #expect(info.short == "0.1.0+dev")
+        #expect(info.short == "0.2.0+dev")
         #expect(info.summary.contains("dev build"))
     }
 
@@ -52,9 +52,9 @@ struct BuildInfoTests {
 
     @Test("a missing or empty version falls back rather than reporting nothing")
     func versionFallback() {
-        #expect(BuildInfo.from(infoDictionary: plist(version: nil)).marketingVersion == "0.1.0")
-        #expect(BuildInfo.from(infoDictionary: plist(version: "")).marketingVersion == "0.1.0")
-        #expect(BuildInfo.from(infoDictionary: plist(version: 42)).marketingVersion == "0.1.0")
+        #expect(BuildInfo.from(infoDictionary: plist(version: nil)).marketingVersion == "0.2.0")
+        #expect(BuildInfo.from(infoDictionary: plist(version: "")).marketingVersion == "0.2.0")
+        #expect(BuildInfo.from(infoDictionary: plist(version: 42)).marketingVersion == "0.2.0")
     }
 
     // MARK: Stamped
@@ -65,8 +65,8 @@ struct BuildInfoTests {
             infoDictionary: plist(commit: "dcb9111", dirty: "false", builtAt: "2026-07-27 18:33"))
         #expect(info.commit == "dcb9111")
         #expect(info.dirty == false)
-        #expect(info.short == "0.1.0+dcb9111")
-        #expect(info.summary == "0.1.0 (dcb9111, built 2026-07-27 18:33)")
+        #expect(info.short == "0.2.0+dcb9111")
+        #expect(info.summary == "0.2.0 (dcb9111, built 2026-07-27 18:33)")
     }
 
     /// The one that matters day to day: this project is habitually built from
@@ -76,7 +76,7 @@ struct BuildInfoTests {
         let info = BuildInfo.from(
             infoDictionary: plist(commit: "dcb9111", dirty: "true", builtAt: "2026-07-27 18:33"))
         #expect(info.dirty)
-        #expect(info.short == "0.1.0+dcb9111.dirty")
+        #expect(info.short == "0.2.0+dcb9111.dirty")
         #expect(info.summary.contains("uncommitted"))
     }
 
@@ -99,7 +99,7 @@ struct BuildInfoTests {
     @Test("a stamp with no build date still reports the commit")
     func noDate() {
         let info = BuildInfo.from(infoDictionary: plist(commit: "abc1234", dirty: "false"))
-        #expect(info.summary == "0.1.0 (abc1234)")
+        #expect(info.summary == "0.2.0 (abc1234)")
     }
 
     // MARK: The health endpoint
@@ -113,13 +113,13 @@ struct BuildInfoTests {
         let response = String(decoding: injected.respond(
             to: HTTPParse.Request(method: "GET", path: "/v1/health", body: Data())),
             as: UTF8.self)
-        #expect(response.contains(#""version":"0.1.0+dcb9111.dirty""#))
+        #expect(response.contains(#""version":"0.2.0+dcb9111.dirty""#))
 
         // Default: tests must never depend on the commit they happen to run at.
         let plain = EventRouter(pid: 4242, deliver: { _ in }, sessionCount: { 3 })
         let plainResponse = String(decoding: plain.respond(
             to: HTTPParse.Request(method: "GET", path: "/v1/health", body: Data())),
             as: UTF8.self)
-        #expect(plainResponse.contains(#""version":"0.1.0""#))
+        #expect(plainResponse.contains(#""version":"0.2.0""#))
     }
 }

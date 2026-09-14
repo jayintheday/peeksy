@@ -72,6 +72,20 @@ public enum ProcessScan {
         return String(path[path.index(after: slash)...])
     }
 
+    /// Candidates already identified by executable name. Argument inspection
+    /// excludes shared servers and remote UI clients from terminal bootstrapping.
+    /// It is deliberately conservative: a false exclusion waits for hook truth.
+    public static func dedicatedCodexPids(_ text: String) -> Set<Int32> {
+        Set(text.split(separator: "\n").compactMap { line -> Int32? in
+            let fields = line.split(whereSeparator: \.isWhitespace)
+            guard let first = fields.first, let pid = Int32(first), fields.count > 1,
+                  !fields.dropFirst().contains(where: {
+                      $0 == "app-server" || $0 == "--remote" || $0.hasPrefix("--remote=")
+                  }) else { return nil }
+            return pid
+        })
+    }
+
     // MARK: - lsof
 
     /// Parse `lsof -a -p <csv> -d cwd -Fpn`.

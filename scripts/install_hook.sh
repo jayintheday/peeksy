@@ -9,6 +9,7 @@
 #
 # Usage:
 #   scripts/install_hook.sh                 preview, then ask before writing
+#   scripts/install_hook.sh --agent codex  select Codex (then trust via /hooks)
 #   scripts/install_hook.sh --dry-run       preview only
 #   scripts/install_hook.sh --yes           write without asking
 #   scripts/install_hook.sh --settings PATH work against a copy (do this first)

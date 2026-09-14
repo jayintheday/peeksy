@@ -12,11 +12,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 APP_NAME="Peeksy"
 BUNDLE_ID="com.vijaypatel.peeksy"
-VERSION="0.1.0"
+VERSION="0.2.0"
 BINARY="Peeksy"
 DIST="dist"
 APP="$DIST/$APP_NAME.app"
-HOOK_SRC="hooks/peeksy-hook.sh"
 ICON_SRC="assets/AppIcon.png"
 ICON="AppIcon.icns"
 
@@ -70,16 +69,11 @@ else
     echo "    note: $ICON not found — bundling without an icon"
 fi
 
-# The hook lives inside the bundle so `claude` invokes a stable path that picks
-# up every rebuild automatically. Defensive: the hook may not have landed yet.
-if [ -f "$HOOK_SRC" ]; then
-    cp "$HOOK_SRC" "$APP/Contents/Resources/peeksy-hook.sh"
-    chmod +x "$APP/Contents/Resources/peeksy-hook.sh"
-    echo "    bundled $HOOK_SRC"
-else
-    echo "    WARNING: $HOOK_SRC not found — bundling without the hook." >&2
-    echo "             Claude Code will not be able to report sessions." >&2
-fi
+# Both scripts are shipped as resources and synced to stable installed paths.
+for hook in hooks/peeksy-hook.sh hooks/peeksy-codex-hook.sh; do
+    cp "$hook" "$APP/Contents/Resources/"
+    chmod +x "$APP/Contents/Resources/$(basename "$hook")"
+done
 
 # NSAppleEventsUsageDescription is mandatory, not cosmetic: without it the very
 # first Apple event fails with errAEEventNotPermitted (-1743), and on some macOS

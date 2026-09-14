@@ -106,24 +106,24 @@ struct MockAdapterSeamTests {
         // The point: `SessionRegistry` has no idea a second agent exists. It
         // sees `HookEnvelope`, which is the whole seam.
         r.apply(try #require(envelope(#"{"conversation":"c1","kind":"begin","location":{"terminal":"ttys007","process":"4242"}}"#)), now: t0)
-        #expect(r["c1"]?.state == .idle)
-        #expect(r["c1"]?.source == .mock)
+        #expect(r["c1", source: .mock]?.state == .idle)
+        #expect(r["c1", source: .mock]?.source == .mock)
 
         r.apply(try #require(envelope(#"{"conversation":"c1","kind":"acting","action":"shell"}"#)), now: t0)
-        #expect(r["c1"]?.state == .working)
-        #expect(r["c1"]?.lastToolSummary == "Mock: shell")
+        #expect(r["c1", source: .mock]?.state == .working)
+        #expect(r["c1", source: .mock]?.lastToolSummary == "Mock: shell")
 
         r.apply(try #require(envelope(#"{"conversation":"c1","kind":"asking","action":"write"}"#)), now: t0)
-        #expect(r["c1"]?.state == .needsAttention)
-        #expect(r["c1"]?.pendingPermission != nil)
+        #expect(r["c1", source: .mock]?.state == .needsAttention)
+        #expect(r["c1", source: .mock]?.pendingPermission != nil)
 
         // The keyboard backstop, which is Claude-Code-shaped reasoning, still
         // applies — because it is a property of the ENVELOPE, not of the agent.
         r.apply(try #require(envelope(#"{"conversation":"c1","kind":"acting","action":"shell"}"#)), now: t0)
-        #expect(r["c1"]?.pendingPermission == nil)
+        #expect(r["c1", source: .mock]?.pendingPermission == nil)
 
         r.apply(try #require(envelope(#"{"conversation":"c1","kind":"settled"}"#)), now: t0)
-        #expect(r["c1"]?.state == .done)
+        #expect(r["c1", source: .mock]?.state == .done)
 
         r.apply(try #require(envelope(#"{"conversation":"c1","kind":"finish"}"#)), now: t0)
         #expect(r.sessions.isEmpty)
@@ -136,8 +136,8 @@ struct MockAdapterSeamTests {
         let later = t0.addingTimeInterval(30)
         r.apply(try #require(envelope(#"{"conversation":"c1","kind":"teleported"}"#)), now: later)
 
-        #expect(r["c1"]?.state == .idle)
-        #expect(r["c1"]?.updatedAt == later)
+        #expect(r["c1", source: .mock]?.state == .idle)
+        #expect(r["c1", source: .mock]?.updatedAt == later)
     }
 
     @Test("two agents coexist in one registry and sort by state, not by source")
@@ -193,7 +193,7 @@ struct MockAdapterSeamTests {
 
         var r = registry()
         r.apply(delivered, now: t0)
-        #expect(r["wire-1"]?.state == .working)
+        #expect(r["wire-1", source: .mock]?.state == .working)
     }
 
     @Test("the SHIPPED app treats /v1/event/mock as unknown, and still answers 204")

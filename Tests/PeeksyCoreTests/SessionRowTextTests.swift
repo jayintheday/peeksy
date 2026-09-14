@@ -34,7 +34,9 @@ struct SessionRowTextTests {
     ) -> [SessionRowText] {
         SessionRowTextBuilder.build(
             sessions: sessions,
-            taskTitle: { titles[$0] },
+            taskTitle: { key in
+                sessions.first { $0.key == key }.flatMap { titles[$0.id] }
+            },
             ownerName: { owners[$0] })
     }
 

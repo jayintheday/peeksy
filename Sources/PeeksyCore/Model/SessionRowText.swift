@@ -52,6 +52,7 @@ public enum SessionRowTextBuilder {
             projectCounts[key, default: 0] += 1
         }
 
+        let mixedSources = Set(sessions.map(\.source)).count > 1
         return sessions.map { session in
             let hasTerminal = normalizeTty(session.tty) != nil
             let owner = session.pid.flatMap(ownerName)
@@ -72,11 +73,15 @@ public enum SessionRowTextBuilder {
                 parts.append(owner)
             }
 
+            if (mixedSources || session.source == .codex), !parts.contains(session.source.displayName) {
+                parts.append(session.source.displayName)
+            }
+
             // A pending permission outranks tool activity: "what is being asked
             // of me" beats "what it was doing".
             let activity = session.pendingPermission?.summary ?? session.lastToolSummary
 
-            guard let title = title(from: taskTitle(session.id)) else {
+            guard let title = title(from: taskTitle(session.key)) else {
                 // No title yet — the pre-titles layout, unchanged.
                 return SessionRowText(title: join(parts) ?? session.source.displayName,
                                       subtitle: activity)

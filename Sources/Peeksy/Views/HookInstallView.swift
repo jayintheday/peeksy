@@ -25,6 +25,15 @@ struct HookInstallView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
+            Picker("Agent", selection: $model.agent) {
+                ForEach(AgentHookConfiguration.allCases) { agent in
+                    Text(agent.name).tag(agent)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text(model.agent.instructions)
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             field("Settings", model.settingsPath)
             field("Hook command", model.command)
             if let preview = model.preview, preview.audit.isClean {
@@ -62,8 +71,8 @@ struct HookInstallView: View {
         case .nothingToDo:
             message(
                 symbol: "checkmark.circle",
-                title: model.action == .install ? "Already installed." : "Not installed.",
-                detail: "Nothing to change.")
+                title: model.action == .install ? "Hooks registered." : "Not registered.",
+                detail: model.agent.instructions)
         case let .done(backup):
             done(backup: backup)
         case let .refused(reason):
@@ -135,16 +144,13 @@ struct HookInstallView: View {
                     .font(.system(size: 13, weight: .medium))
             }
             if let status = model.scriptStatus {
-                field("Script", "\(SupportPaths.hookScript().path) — \(status)")
+                field("Script", "\(model.agent.scriptURL().path) — \(status)")
             }
             if let backup {
                 field("Backup", backup)
             }
             if model.action == .install {
-                Text("""
-                    New Claude Code sessions pick this up automatically. A session that is \
-                    already running needs to be restarted, or `/hooks` to reload.
-                    """)
+                Text(model.agent.instructions)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -169,7 +175,7 @@ struct HookInstallView: View {
                     Button("Copy diff") { model.copyDiff() }
                 }
             }
-            Button("Reveal settings.json") { model.revealSettings() }
+            Button("Reveal settings") { model.revealSettings() }
 
             Spacer()
 
