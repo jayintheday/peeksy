@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `--doctor` reads Codex's hook trust record (`[hooks.state]` in `$CODEX_HOME/config.toml`) and reports, per event, whether Peeksy's hook is trusted, disabled, or waiting for review in `/hooks`. Registration alone was already reported; this is the line that says whether Codex will actually run it.
+
+### Changed
+
+- README and the install sheet now spell out the three reasons a Codex session shows nothing after install: untrusted hooks, a session started before the registration, and a session trusted mid-run that has not yet had a prompt.
+
 ## 0.2.0 — 2026-09-14
 
 Peeksy now monitors Claude Code and Codex sessions together.

@@ -178,9 +178,17 @@ enum FocusCLI {
             let all = ProcessScanner().scan(names: names, requireTerminal: false)
             print("\(agent.name) processes:")
             report(all)
-            print("  hooks: \(agent.installer().isInstalled() ? "registered" : "not registered")")
+            let installer = agent.installer()
+            print("  hooks: \(installer.isInstalled() ? "registered" : "not registered")")
             print("  settings: \(agent.settingsURL().path)")
-            if agent == .codex { print("  Trust and runtime delivery: verify in Codex /hooks; registration alone is not proof.") }
+            // Codex skips a registered hook until the user trusts it in /hooks,
+            // and says so nowhere we can otherwise read. Registration alone is
+            // not proof; this is the line that turns it into some.
+            if let trustRecord = agent.trustRecordURL() {
+                let trust = codexTrust(installer, settingsPath: agent.settingsURL().path,
+                                       events: agent.events.map(\.event), record: trustRecord)
+                print("  trust: \(trust)")
+            }
             print("")
         }
 
@@ -229,6 +237,19 @@ enum FocusCLI {
         }
 
         return blocked ? 1 : 0
+    }
+
+    /// One line: what Codex has recorded about our hooks. Read-only.
+    private static func codexTrust(
+        _ installer: HookInstaller, settingsPath: String, events: [String], record: URL
+    ) -> String {
+        let positions = installer.positions()
+        guard !positions.isEmpty else { return "n/a — nothing registered to check" }
+        guard let toml = try? String(contentsOf: record, encoding: .utf8) else {
+            return "unknown — cannot read \(record.path)"
+        }
+        return CodexHookTrust.audit(configTOML: toml, settingsPath: settingsPath,
+                                    events: events, positions: positions).summary
     }
 
     // MARK: - --capture-report

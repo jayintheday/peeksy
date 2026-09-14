@@ -152,6 +152,13 @@ public struct HookInstaller: Sendable {
         return plan.isNoOp
     }
 
+    /// Where each event's registration sits on disk — the coordinates
+    /// `CodexHookTrust` needs to find Codex's record of it. Read-only.
+    public func positions() -> [String: SettingsMerge.Position] {
+        guard let settings = try? SettingsIO.read(settingsURL) ?? [:] else { return [:] }
+        return SettingsMerge.positions(in: settings, command: command, events: events, source: source)
+    }
+
     // MARK: - Errors
 
     public enum Failure: Error, Equatable, CustomStringConvertible {

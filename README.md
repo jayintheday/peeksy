@@ -85,6 +85,26 @@ dist/Peeksy.app/Contents/MacOS/Peeksy --print-hook-json --agent codex
 dist/Peeksy.app/Contents/MacOS/Peeksy --uninstall-hook --agent codex
 ```
 
+**If a Codex session does not appear**, run
+`dist/Peeksy.app/Contents/MacOS/Peeksy --doctor` and read the `trust:` line
+under *Codex processes*. Then, in order:
+
+1. **Trust the hooks.** Codex skips a registered hook until you trust it in
+   `/hooks`, and reports that nowhere Peeksy can see — a session running
+   untrusted hooks looks exactly like no session. The doctor reads Codex's own
+   record (`[hooks.state]` in `$CODEX_HOME/config.toml`) and says which of the
+   eight are trusted, disabled, or waiting for review.
+2. **Restart any Codex that was already open when you installed.** Codex reads
+   `hooks.json` at startup; a session older than the registration never had the
+   hook and never will.
+3. **Send a prompt.** A session you trusted mid-run reports from its next
+   `UserPromptSubmit`; its `SessionStart` already fired untrusted, so an empty
+   prompt box is not a broken hook.
+
+Trust is recorded against the hook definition (the `hooks.json` entry), not
+the script body. Upgrading Peeksy in place keeps it; changing the entry — a
+different path or timeout — puts it back up for review.
+
 Without `--agent`, installer commands retain their Claude Code behavior.
 Codex configuration goes in `$CODEX_HOME/hooks.json`, defaulting to
 `~/.codex/hooks.json`; the script lives at `~/.peeksy/peeksy-codex-hook.sh`.
