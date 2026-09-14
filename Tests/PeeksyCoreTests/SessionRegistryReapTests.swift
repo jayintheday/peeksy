@@ -49,7 +49,7 @@ struct SessionRegistryReapTests {
         #expect(r["s1"]?.state == .needsAttention)
 
         let result = reap(&r, at: t0.addingTimeInterval(1800), agents: [1])
-        #expect(result.attentionExpired == ["s1"])
+        #expect(result.attentionExpired == ["claude-code:s1"])
         #expect(r["s1"]?.state == .idle)
     }
 
@@ -93,8 +93,8 @@ struct SessionRegistryReapTests {
         // (1800) in the same iteration, in that order.
         let result = reap(&r, at: t0.addingTimeInterval(1800), agents: [1])
 
-        #expect(result.permissionsExpired == ["s1"])
-        #expect(result.attentionExpired == ["s1"])
+        #expect(result.permissionsExpired == ["claude-code:s1"])
+        #expect(result.attentionExpired == ["claude-code:s1"])
         #expect(r["s1"]?.state == .idle)
     }
 
@@ -117,7 +117,7 @@ struct SessionRegistryReapTests {
         r.apply(env("Notification", pid: 1, notificationType: "idle_prompt"), now: t0)
         let first = reap(&r, at: t0.addingTimeInterval(1800), agents: [1])
         let second = reap(&r, at: t0.addingTimeInterval(1801), agents: [1])
-        #expect(first.attentionExpired == ["s1"])
+        #expect(first.attentionExpired == ["claude-code:s1"])
         #expect(second.isEmpty)
     }
 
@@ -130,7 +130,7 @@ struct SessionRegistryReapTests {
         #expect(r["s1"]?.state == .working)
 
         let result = r.reap(now: t0.addingTimeInterval(600))
-        #expect(result.staled == ["s1"])
+        #expect(result.staled == ["claude-code:s1"])
         #expect(r["s1"]?.state == .stale)
     }
 
@@ -158,7 +158,7 @@ struct SessionRegistryReapTests {
         #expect(r["s1"] != nil)
 
         let result = r.reap(now: t0.addingTimeInterval(45))
-        #expect(result.removed == ["s1"])
+        #expect(result.removed == ["claude-code:s1"])
         #expect(r["s1"] == nil)
     }
 
@@ -181,7 +181,7 @@ struct SessionRegistryReapTests {
         r.apply(env("PreToolUse"), now: t0) // no _meta.pid ever arrived
 
         #expect(r.reap(now: t0.addingTimeInterval(599)).removed.isEmpty)
-        #expect(r.reap(now: t0.addingTimeInterval(600)).removed == ["s1"])
+        #expect(r.reap(now: t0.addingTimeInterval(600)).removed == ["claude-code:s1"])
     }
 
     // MARK: The IDE host
@@ -201,7 +201,7 @@ struct SessionRegistryReapTests {
         #expect(reap(&r, at: t0.addingTimeInterval(599), agents: [99]).removed.isEmpty)
         #expect(r["s1"] != nil)
 
-        #expect(reap(&r, at: t0.addingTimeInterval(600), agents: [99]).removed == ["s1"])
+        #expect(reap(&r, at: t0.addingTimeInterval(600), agents: [99]).removed == ["claude-code:s1"])
     }
 
     @Test("a live pid the sweep DID see is alive, and outlives the orphan TTL")
@@ -269,7 +269,7 @@ struct SessionRegistryReapTests {
         r.apply(env("PreToolUse", pid: 1), now: t0)
 
         #expect(r.liveness(of: r["s1"]!, now: t0) == .dead)
-        #expect(r.reap(now: t0.addingTimeInterval(45)).removed == ["s1"])
+        #expect(r.reap(now: t0.addingTimeInterval(45)).removed == ["claude-code:s1"])
     }
 
     @Test("EPERM means alive: a pid we cannot signal is still a running session")
@@ -290,7 +290,7 @@ struct SessionRegistryReapTests {
         #expect(r["s1"]?.pendingPermission != nil)
 
         let result = r.reap(now: t0.addingTimeInterval(300))
-        #expect(result.permissionsExpired == ["s1"])
+        #expect(result.permissionsExpired == ["claude-code:s1"])
         #expect(r["s1"]?.pendingPermission == nil)
         // The state is left alone: the human still has not answered, so far as
         // we know. Only the prompt detail goes.
@@ -305,7 +305,7 @@ struct SessionRegistryReapTests {
 
         let result = r.reap(now: t0.addingTimeInterval(1800))
 
-        #expect(result.removed == ["s1", "w"])
+        #expect(result.removed == ["claude-code:s1", "claude-code:w"])
         #expect(result.staled.isEmpty)
         #expect(result.permissionsExpired.isEmpty)
     }
@@ -320,8 +320,8 @@ struct SessionRegistryReapTests {
         let first = r.reap(now: now)
         let second = r.reap(now: now)
 
-        #expect(first.staled == ["s1"])
-        #expect(first.permissionsExpired == ["p"])
+        #expect(first.staled == ["claude-code:s1"])
+        #expect(first.permissionsExpired == ["claude-code:p"])
         #expect(second.isEmpty)
     }
 
@@ -345,7 +345,7 @@ struct SessionRegistryReapTests {
         #expect(r["s1"]?.state == .needsAttention)
 
         // And the clock coming back does the right thing rather than staying wedged.
-        #expect(r.reap(now: t0.addingTimeInterval(1800)).removed == ["s1"])
+        #expect(r.reap(now: t0.addingTimeInterval(1800)).removed == ["claude-code:s1"])
     }
 
     @Test("a future updatedAt (clock stepped forward then back) never ages a session")
@@ -391,6 +391,6 @@ struct SessionRegistryReapTests {
         var r = registry(alive: [], policy: policy)
         for id in ["c", "a", "b"] { r.apply(env("PreToolUse", id: id), now: t0) }
 
-        #expect(r.reap(now: t0.addingTimeInterval(1800)).removed == ["a", "b", "c"])
+        #expect(r.reap(now: t0.addingTimeInterval(1800)).removed == ["claude-code:a", "claude-code:b", "claude-code:c"])
     }
 }

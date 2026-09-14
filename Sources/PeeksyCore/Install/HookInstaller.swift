@@ -51,13 +51,19 @@ public struct HookInstallPreview: Sendable {
 public struct HookInstaller: Sendable {
     public let settingsURL: URL
     public let command: String
+    public let source: AgentSource
+    public let events: [HookEventSpec]
 
     public init(
         settingsURL: URL = SupportPaths.claudeSettings(),
-        command: String = HookSpec.shellQuoted(SupportPaths.hookScript().path)
+        command: String = HookSpec.shellQuoted(SupportPaths.hookScript().path),
+        source: AgentSource = .claudeCode,
+        events: [HookEventSpec] = HookSpec.events
     ) {
         self.settingsURL = settingsURL
         self.command = command
+        self.source = source
+        self.events = events
     }
 
     // MARK: - Preview
@@ -68,11 +74,11 @@ public struct HookInstaller: Sendable {
 
         let plan: SettingsMerge.Plan
         switch action {
-        case .install: plan = try SettingsMerge.install(into: before, command: command)
-        case .uninstall: plan = try SettingsMerge.uninstall(from: before, command: command)
+        case .install: plan = try SettingsMerge.install(into: before, command: command, events: events, source: source)
+        case .uninstall: plan = try SettingsMerge.uninstall(from: before, command: command, events: events, source: source)
         }
 
-        let audit = SettingsAudit.preservation(before: before, after: plan.merged, command: command)
+        let audit = SettingsAudit.preservation(before: before, after: plan.merged, command: command, source: source)
         // Both sides through the SAME serializer. That is the whole trick: the
         // key reordering `JSONSerialization` imposes appears on both sides and
         // cancels, so the diff shows the merge and nothing else.
@@ -112,8 +118,8 @@ public struct HookInstaller: Sendable {
 
         let plan: SettingsMerge.Plan
         switch preview.action {
-        case .install: plan = try SettingsMerge.install(into: current, command: command)
-        case .uninstall: plan = try SettingsMerge.uninstall(from: current, command: command)
+        case .install: plan = try SettingsMerge.install(into: current, command: command, events: events, source: source)
+        case .uninstall: plan = try SettingsMerge.uninstall(from: current, command: command, events: events, source: source)
         }
 
         let command = self.command
@@ -122,7 +128,7 @@ public struct HookInstaller: Sendable {
             // wrong between the merge and here — serializer, short write, full
             // disk — is caught while the original file is still in place.
             var reasons: [String] = []
-            let report = SettingsAudit.preservation(before: current, after: written, command: command)
+            let report = SettingsAudit.preservation(before: current, after: written, command: command, source: source)
             reasons.append(contentsOf: report.violations)
             if SettingsAudit.canonical(written) != SettingsAudit.canonical(plan.merged) {
                 reasons.append("the file we wrote does not match the merge we previewed")
@@ -141,7 +147,7 @@ public struct HookInstaller: Sendable {
     /// is the only answer that gets the user to fix it.
     public func isInstalled() -> Bool {
         guard let settings = try? SettingsIO.read(settingsURL) ?? [:],
-              let plan = try? SettingsMerge.install(into: settings, command: command)
+              let plan = try? SettingsMerge.install(into: settings, command: command, events: events, source: source)
         else { return false }
         return plan.isNoOp
     }

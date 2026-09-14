@@ -17,7 +17,11 @@ public enum AgentRegistry {
     /// Computed, not a stored global: a stored `let` of existential metatypes
     /// buys nothing and costs a global-initialiser.
     public static var all: [any AgentAdapter.Type] {
-        [ClaudeCodeAdapter.self]
+        [ClaudeCodeAdapter.self, CodexAdapter.self]
+    }
+
+    public static var processNames: Set<String> {
+        all.reduce(into: Set<String>()) { $0.formUnion($1.processNames) }
     }
 
     public static func adapter(for source: AgentSource) -> (any AgentAdapter.Type)? {

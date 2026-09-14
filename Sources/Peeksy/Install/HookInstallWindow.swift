@@ -31,7 +31,10 @@ final class HookInstallModel {
     private(set) var scriptStatus: String?
 
     let action: HookInstallPreview.Action
-    private let installer: HookInstaller
+    private var installer: HookInstaller
+    var agent: AgentHookConfiguration = .claudeCode {
+        didSet { installer = agent.installer(); refresh() }
+    }
     private let onClose: () -> Void
 
     init(
@@ -41,6 +44,7 @@ final class HookInstallModel {
     ) {
         self.action = action
         self.installer = installer
+        self.agent = installer.source == .codex ? .codex : .claudeCode
         self.onClose = onClose
         refresh()
     }
@@ -74,7 +78,7 @@ final class HookInstallModel {
         // is not there. Only after the user has said yes: a cancelled sheet
         // should leave nothing behind.
         if action == .install {
-            switch InstallCLI.syncScript(to: SupportPaths.hookScript()) {
+            switch InstallCLI.syncScript(to: agent.scriptURL(), agent: agent) {
             case let .success(outcome):
                 scriptStatus = outcome == .upToDate ? "already up to date" : outcome.rawValue
             case let .failure(complaint):

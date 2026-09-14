@@ -144,9 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func bootstrapRunningSessions(into store: SessionStore) {
         let scanner = ProcessScanner()
         ioQueue.async {
-            let found = scanner.scan()
-            guard !found.isEmpty else { return }
-            Task { @MainActor in store.bootstrap(found) }
+            for adapter in AgentRegistry.all {
+                let found = scanner.scan(names: adapter.processNames)
+                let source = adapter.source
+                if !found.isEmpty { Task { @MainActor in store.bootstrap(found, source: source) } }
+            }
         }
     }
 
@@ -161,14 +163,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Writing a script nobody asked for, into a directory the user has not
     /// opted into, is not something a launch should do.
     private func refreshInstalledHookScript() {
-        guard HookProbe.isInstalled() else { return }
-        switch InstallCLI.syncScript(to: SupportPaths.hookScript()) {
-        case let .success(outcome) where outcome != .upToDate:
-            uiLog.info("hook script \(outcome.rawValue, privacy: .public) from the app bundle")
-        case .success:
-            break
-        case let .failure(complaint):
-            uiLog.error("could not refresh the hook script: \(complaint.description, privacy: .public)")
+        for agent in AgentHookConfiguration.allCases where agent.installer().isInstalled() {
+            switch InstallCLI.syncScript(to: agent.scriptURL(), agent: agent) {
+            case let .failure(complaint):
+                uiLog.error("could not refresh hook: \(complaint.description, privacy: .public)")
+            case .success: break
+            }
         }
     }
 

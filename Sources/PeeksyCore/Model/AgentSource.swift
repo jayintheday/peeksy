@@ -8,6 +8,7 @@ import Foundation
 /// compile-time checklist rather than a grep.
 public enum AgentSource: String, Sendable, Codable, CaseIterable {
     case claudeCode = "claude-code"
+    case codex
 
     /// A second agent that exists only so the seam can be exercised.
     ///
@@ -26,6 +27,7 @@ public enum AgentSource: String, Sendable, Codable, CaseIterable {
     public var displayName: String {
         switch self {
         case .claudeCode: return "Claude Code"
+        case .codex: return "Codex"
         case .mock: return "Mock Agent"
         }
     }

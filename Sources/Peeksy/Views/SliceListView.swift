@@ -40,7 +40,7 @@ struct SliceRow: Identifiable, Equatable {
 
         return zip(sessions, texts).map { session, text in
             SliceRow(
-                id: session.id,
+                id: session.key,
                 session: session,
                 label: text.title,
                 stateText: stateText(for: session),
@@ -124,6 +124,7 @@ struct SliceListView: View {
                 list
             }
             Spacer(minLength: 0)
+            Button("Agent hooks…") { onInstallHook() }.padding(8)
             footer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -201,7 +202,7 @@ struct SliceListView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No agent sessions.")
             if !store.hookInstalled {
-                Text("Claude Code is not reporting to Peeksy yet.")
+                Text("Your agents are not reporting to Peeksy yet.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

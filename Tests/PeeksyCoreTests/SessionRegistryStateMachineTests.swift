@@ -57,7 +57,7 @@ struct SessionRegistryStateMachineTests {
         var r = registry()
         let result = r.apply(env("SessionStart", cwd: "/a/b", tty: "ttys003", pid: 42), now: t0)
 
-        #expect(result == .updated("s1"))
+        #expect(result == .updated("claude-code:s1"))
         #expect(r["s1"]?.state == .idle)
         #expect(r["s1"]?.origin == .hook)
         #expect(r["s1"]?.cwd == "/a/b")
@@ -174,7 +174,7 @@ struct SessionRegistryStateMachineTests {
         r.apply(env("SessionStart"), now: t0)
         let result = r.apply(env("SessionEnd"), now: t0.addingTimeInterval(1))
 
-        #expect(result == .removed("s1"))
+        #expect(result == .removed("claude-code:s1"))
         #expect(r["s1"] == nil)
         #expect(r.sessions.isEmpty)
     }
@@ -185,7 +185,7 @@ struct SessionRegistryStateMachineTests {
         r.apply(env("PreToolUse"), now: t0)
         let result = r.apply(env("SomeEventInventedNextYear"), now: t0.addingTimeInterval(30))
 
-        #expect(result == .updated("s1"))
+        #expect(result == .updated("claude-code:s1"))
         #expect(r["s1"]?.state == .working)
         #expect(r["s1"]?.updatedAt == t0.addingTimeInterval(30))
     }
@@ -196,7 +196,7 @@ struct SessionRegistryStateMachineTests {
         r.apply(env("SessionStart"), now: t0)
         let result = r.apply(env(""), now: t0.addingTimeInterval(1))
 
-        #expect(result == .updated("s1"))
+        #expect(result == .updated("claude-code:s1"))
         #expect(r["s1"]?.state == .idle)
     }
 

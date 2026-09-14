@@ -1,11 +1,18 @@
 import Foundation
 
 /// One tracked agent session.
-public struct Session: Sendable, Equatable, Identifiable {
+public struct Session: Sendable, Equatable {
     /// The agent's session id (ACP calls this `sessionId`), or `"boot:<pid>"`
     /// pre-adoption.
     public let id: String
+    /// Source-qualified identity for registry, UI, and auxiliary caches.
+    public var key: String { Self.key(source: source, id: id) }
+    public static func key(source: AgentSource, id: String) -> String { "\(source.rawValue):\(id)" }
     public let source: AgentSource
+    public var dedicatedProcess: Bool?
+    public var turnID: String?
+    public var completedTurnIDs: Set<String> = []
+    public var pendingPermissions: [String: PendingPermission] = [:]
     public var cwd: String?
     /// Bare form, `"ttys003"` — never `/dev/ttys003`.
     public var tty: String?

@@ -108,7 +108,7 @@ public enum SettingsMerge {
         case shared
     }
 
-    static func ownership(of group: [String: Any], command: String) -> Ownership {
+    static func ownership(of group: [String: Any], command: String, source: AgentSource = .claudeCode) -> Ownership {
         guard let hooks = group[HookSpec.hooksKey] as? [Any], !hooks.isEmpty else { return .notOurs }
         var mine = 0
         for entry in hooks {
@@ -118,7 +118,7 @@ public enum SettingsMerge {
             // Recognised by script name as well as by exact string, so a
             // registration written by an older version is MIGRATED rather than
             // orphaned. See `HookSpec.isOurCommand`.
-            if HookSpec.isOurCommand(stored, desired: command) { mine += 1 }
+            if HookSpec.isOurCommand(stored, desired: command, source: source) { mine += 1 }
         }
         if mine == 0 { return .notOurs }
         return mine == hooks.count ? .exclusive : .shared
@@ -132,25 +132,33 @@ public enum SettingsMerge {
         return hook[HookSpec.commandKey] as? String
     }
 
+    private static func isCanonical(_ group: [String: Any], command: String, spec: HookEventSpec) -> Bool {
+        var normalized = group
+        if HookSpec.matcher(of: group) == nil { normalized.removeValue(forKey: HookSpec.matcherKey) }
+        return SettingsAudit.canonical(normalized) == SettingsAudit.canonical(
+            HookSpec.group(command: command, matcher: spec.matcher, timeout: spec.timeout))
+    }
+
     // MARK: - Install
 
     /// Add every missing registration. Idempotent.
-    public static func install(into settings: [String: Any], command: String) throws -> Plan {
+    public static func install(into settings: [String: Any], command: String, events: [HookEventSpec] = HookSpec.events, source: AgentSource = .claudeCode) throws -> Plan {
         var root = settings
         var hooks = try hooksObject(in: root)
         var outcomes: [EventOutcome] = []
 
-        for spec in HookSpec.events {
+        for spec in events {
             var groups = try groupArray(in: hooks, event: spec.event)
             let disposition: Disposition
 
-            if let match = try ourGroup(in: groups, event: spec.event, command: command) {
+            if let match = try ourGroup(in: groups, event: spec.event, command: command, source: source) {
                 if match.ownership == .shared {
                     // Somebody hand-merged our command in beside another tool's.
                     // Rewriting that group would delete their hook.
                     disposition = .unchanged
                 } else if HookSpec.matcher(of: match.group) == spec.matcher,
-                          storedCommand(of: match.group) == command {
+                          storedCommand(of: match.group) == command,
+                          isCanonical(match.group, command: command, spec: spec) {
                     disposition = .unchanged
                 } else {
                     // Either the matcher is wrong — in which case the hook never
@@ -158,13 +166,13 @@ public enum SettingsMerge {
                     // install to. Both mean a registration that does nothing.
                     // The group is ours and ours alone, so rewriting it destroys
                     // nothing, and it is what migrates an old install in place.
-                    groups[match.index] = HookSpec.group(command: command, matcher: spec.matcher)
+                    groups[match.index] = HookSpec.group(command: command, matcher: spec.matcher, timeout: spec.timeout)
                     disposition = .repaired
                 }
             } else {
                 // APPEND, never insert. Foreign groups keep their order and we
                 // run last, after whatever was already registered.
-                groups.append(HookSpec.group(command: command, matcher: spec.matcher))
+                groups.append(HookSpec.group(command: command, matcher: spec.matcher, timeout: spec.timeout))
                 disposition = .added
             }
 
@@ -179,15 +187,15 @@ public enum SettingsMerge {
     // MARK: - Uninstall
 
     /// Remove every group that is exclusively ours, and nothing else.
-    public static func uninstall(from settings: [String: Any], command: String) throws -> Plan {
+    public static func uninstall(from settings: [String: Any], command: String, events: [HookEventSpec] = HookSpec.events, source: AgentSource = .claudeCode) throws -> Plan {
         var root = settings
         var hooks = try hooksObject(in: root)
         var outcomes: [EventOutcome] = []
 
         // Every event in the file, not just our nine: a stale registration under
         // an event we no longer ask for still has to come out.
-        let allEvents = Set(hooks.keys).union(HookSpec.events.map(\.event)).sorted()
-        let specByEvent = Dictionary(uniqueKeysWithValues: HookSpec.events.map { ($0.event, $0) })
+        let allEvents = Set(hooks.keys).union(events.map(\.event)).sorted()
+        let specByEvent = Dictionary(uniqueKeysWithValues: events.map { ($0.event, $0) })
 
         for event in allEvents {
             guard hooks[event] != nil else {
@@ -203,7 +211,7 @@ public enum SettingsMerge {
                 guard let group = raw as? [String: Any] else {
                     throw Refusal.groupNotAnObject(event: event, index: index)
                 }
-                return ownership(of: group, command: command) == .exclusive ? nil : raw
+                return ownership(of: group, command: command, source: source) == .exclusive ? nil : raw
             }
 
             let removed = before - groups.count
@@ -260,14 +268,15 @@ public enum SettingsMerge {
     private static func ourGroup(
         in groups: [Any],
         event: String,
-        command: String
+        command: String,
+        source: AgentSource
     ) throws -> OwnedGroup? {
         var found: OwnedGroup?
         for (index, raw) in groups.enumerated() {
             guard let group = raw as? [String: Any] else {
                 throw Refusal.groupNotAnObject(event: event, index: index)
             }
-            let owned = ownership(of: group, command: command)
+            let owned = ownership(of: group, command: command, source: source)
             if owned != .notOurs, found == nil {
                 found = OwnedGroup(index: index, group: group, ownership: owned)
             }

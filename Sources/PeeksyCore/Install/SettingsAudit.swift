@@ -55,7 +55,8 @@ public enum SettingsAudit {
     public static func preservation(
         before: [String: Any],
         after: [String: Any],
-        command: String
+        command: String,
+        source: AgentSource = .claudeCode
     ) -> Report {
         var violations: [String] = []
 
@@ -77,8 +78,8 @@ public enum SettingsAudit {
         let afterHooks = after[HookSpec.hooksKey] as? [String: Any] ?? [:]
 
         // 2. Foreign groups, per event, in order.
-        let beforeForeign = foreignGroups(in: beforeHooks, command: command)
-        let afterForeign = foreignGroups(in: afterHooks, command: command)
+        let beforeForeign = foreignGroups(in: beforeHooks, command: command, source: source)
+        let afterForeign = foreignGroups(in: afterHooks, command: command, source: source)
         if beforeForeign != afterForeign {
             let lost = beforeForeign.filter { !afterForeign.contains($0) }
             for group in lost {
@@ -105,15 +106,15 @@ public enum SettingsAudit {
             hookEventsAfter: afterHooks.count,
             foreignGroupsBefore: beforeForeign.count,
             foreignGroupsAfter: afterForeign.count,
-            ourGroupsBefore: ourGroupCount(in: beforeHooks, command: command),
-            ourGroupsAfter: ourGroupCount(in: afterHooks, command: command),
+            ourGroupsBefore: ourGroupCount(in: beforeHooks, command: command, source: source),
+            ourGroupsAfter: ourGroupCount(in: afterHooks, command: command, source: source),
             violations: violations
         )
     }
 
     // MARK: - Private
 
-    private static func foreignGroups(in hooks: [String: Any], command: String) -> [ForeignGroup] {
+    private static func foreignGroups(in hooks: [String: Any], command: String, source: AgentSource) -> [ForeignGroup] {
         var found: [ForeignGroup] = []
         for event in hooks.keys.sorted() {
             guard let groups = hooks[event] as? [Any] else { continue }
@@ -126,7 +127,7 @@ public enum SettingsAudit {
                     position += 1
                     continue
                 }
-                guard SettingsMerge.ownership(of: group, command: command) == .notOurs else { continue }
+                guard SettingsMerge.ownership(of: group, command: command, source: source) != .exclusive else { continue }
                 found.append(ForeignGroup(event: event, position: position, json: canonical(group)))
                 position += 1
             }
@@ -134,13 +135,13 @@ public enum SettingsAudit {
         return found
     }
 
-    private static func ourGroupCount(in hooks: [String: Any], command: String) -> Int {
+    private static func ourGroupCount(in hooks: [String: Any], command: String, source: AgentSource) -> Int {
         var count = 0
         for (_, raw) in hooks {
             guard let groups = raw as? [Any] else { continue }
             for entry in groups {
                 guard let group = entry as? [String: Any] else { continue }
-                if SettingsMerge.ownership(of: group, command: command) != .notOurs { count += 1 }
+                if SettingsMerge.ownership(of: group, command: command, source: source) != .notOurs { count += 1 }
             }
         }
         return count

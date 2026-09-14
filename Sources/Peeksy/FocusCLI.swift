@@ -173,27 +173,14 @@ enum FocusCLI {
         //    This used to match "claude" anywhere in `args` and listed seventeen
         //    Claude.app helper processes; `ProcessScan` is the same filter the
         //    app actually seeds from, so the two can never disagree.
-        let all = ProcessScanner().scan(requireTerminal: false)
-        let sessions = all.filter { $0.tty != nil }
-        if sessions.isEmpty {
-            print("claude processes: none with a terminal")
-        } else {
-            print("claude processes:")
-            report(sessions)
-        }
-        print("")
-
-        // 3b. The same processes the scan REFUSES to seed — no controlling tty,
-        //     so they can only ever reach the app through a hook. Claude.app's
-        //     embedded agent and anything launched from an IDE's agent panel
-        //     land here, and until this section existed they were invisible to
-        //     every diagnostic: the first evidence of a broken owner lookup was
-        //     a bad row label and a Finder alert on click.
-        let ttyless = all.filter { $0.tty == nil }
-        if !ttyless.isEmpty {
-            print("claude processes without a terminal:")
-            print("                  (hook-only — never seeded from `ps`)")
-            report(ttyless)
+        for agent in AgentHookConfiguration.allCases {
+            let names = AgentRegistry.adapter(for: agent.source)?.processNames ?? []
+            let all = ProcessScanner().scan(names: names, requireTerminal: false)
+            print("\(agent.name) processes:")
+            report(all)
+            print("  hooks: \(agent.installer().isInstalled() ? "registered" : "not registered")")
+            print("  settings: \(agent.settingsURL().path)")
+            if agent == .codex { print("  Trust and runtime delivery: verify in Codex /hooks; registration alone is not proof.") }
             print("")
         }
 

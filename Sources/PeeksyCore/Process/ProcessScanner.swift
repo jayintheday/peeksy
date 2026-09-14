@@ -33,7 +33,12 @@ public struct ProcessScanner: Sendable {
         requireTerminal: Bool = true
     ) -> [DiscoveredProcess] {
         guard let listing = run("/bin/ps", ["-Ao", "pid=,ppid=,tty=,comm="]) else { return [] }
-        let processes = ProcessScan.parsePS(listing, names: names, requireTerminal: requireTerminal)
+        var processes = ProcessScan.parsePS(listing, names: names, requireTerminal: requireTerminal)
+        if requireTerminal && names == CodexAdapter.processNames {
+            guard let arguments = run("/bin/ps", ["-Ao", "pid=,args="]) else { return [] }
+            let dedicated = ProcessScan.dedicatedCodexPids(arguments)
+            processes = processes.filter { dedicated.contains($0.pid) }
+        }
         guard !processes.isEmpty else { return [] }
 
         // ONE lsof for all of them. Measured at ~26 ms for two pids; per-process

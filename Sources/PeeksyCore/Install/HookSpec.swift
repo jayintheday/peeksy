@@ -9,10 +9,12 @@ public struct HookEventSpec: Sendable, Equatable {
     /// event, which is the app's highest-value signal, and the failure looks
     /// exactly like "the app just never shows red".
     public let matcher: String?
+    public let timeout: Int?
 
-    public init(event: String, matcher: String?) {
+    public init(event: String, matcher: String?, timeout: Int? = nil) {
         self.event = event
         self.matcher = matcher
+        self.timeout = timeout
     }
 }
 
@@ -49,10 +51,10 @@ public enum HookSpec {
     /// `matcher` is OMITTED rather than written as `null` when the spec has
     /// none — a `null` matcher is not the same JSON as an absent one, and only
     /// the absent form matches what Claude Code's own docs show.
-    public static func group(command: String, matcher: String?) -> [String: Any] {
-        var group: [String: Any] = [
-            hooksKey: [[typeKey: commandType, commandKey: command] as [String: Any]]
-        ]
+    public static func group(command: String, matcher: String?, timeout: Int? = nil) -> [String: Any] {
+        var handler: [String: Any] = [typeKey: commandType, commandKey: command]
+        if let timeout { handler["timeout"] = timeout }
+        var group: [String: Any] = [hooksKey: [handler]]
         if let matcher, !matcher.isEmpty { group[matcherKey] = matcher }
         return group
     }
@@ -71,10 +73,10 @@ public enum HookSpec {
     ///
     /// "What will change in MY file" is a different question with its own
     /// answer already: the unified diff from `HookInstaller.preview`.
-    public static func snippet(command: String) -> [String: Any] {
+    public static func snippet(command: String, events: [HookEventSpec] = HookSpec.events) -> [String: Any] {
         var groups: [String: Any] = [:]
         for spec in events {
-            groups[spec.event] = [group(command: command, matcher: spec.matcher)]
+            groups[spec.event] = [group(command: command, matcher: spec.matcher, timeout: spec.timeout)]
         }
         return [hooksKey: groups]
     }
@@ -130,11 +132,13 @@ public enum HookSpec {
     /// written by an older version; without it, moving OR RENAMING the script
     /// would leave nine dead groups behind and add nine live ones beside them.
     /// No other tool ships a file by any of these names.
-    public static func isOurCommand(_ command: String, desired: String) -> Bool {
+    public static func isOurCommand(_ command: String, desired: String, source: AgentSource = .claudeCode) -> Bool {
         if command == desired { return true }
         let path = unquoted(command)
         if path == unquoted(desired) { return true }
-        return ownedScriptNames.contains { path.hasSuffix("/" + $0) || path == $0 }
+        let names = source == .codex
+            ? ["peeksy-codex-hook.sh"] : ownedScriptNames
+        return names.contains { path.hasSuffix("/" + $0) || path == $0 }
     }
 
     /// Matcher of an existing group, with `""` folded onto `nil`.
