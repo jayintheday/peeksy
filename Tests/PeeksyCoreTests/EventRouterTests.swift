@@ -113,7 +113,7 @@ struct EventRouterTests {
         #expect(response.hasPrefix("HTTP/1.1 200 OK\r\n"))
         #expect(response.contains("Content-Type: application/json\r\n"))
         #expect(response.contains("Connection: close\r\n"))
-        #expect(response.hasSuffix(#"{"ok":true,"version":"0.1.0","sessions":3,"pid":4242}"#))
+        #expect(response.hasSuffix(#"{"ok":true,"version":"0.2.0","sessions":3,"pid":4242}"#))
         #expect(response.contains("Content-Length: 53\r\n"))
     }
 
@@ -128,7 +128,7 @@ struct EventRouterTests {
         #expect(json["ok"] as? Bool == true)
         #expect(json["sessions"] as? Int == 7)
         #expect(json["pid"] as? Int == 4242)
-        #expect(json["version"] as? String == "0.1.0")
+        #expect(json["version"] as? String == "0.2.0")
     }
 
     @Test("anything else is 404 — and still closes the connection")

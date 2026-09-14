@@ -33,7 +33,7 @@ jobs:
       # The whole suite is PeeksyCore — Foundation only, no AppKit, no
       # window server — so it runs headless on a CI box exactly as it does
       # locally. Anything that needs a screen lives behind the AppKit split
-      # line and is verified by hand; see LEARNINGS.md.
+      # line and is verified by hand.
       - name: Test
         timeout-minutes: 8
         # Unbuffered, so the log shows every "Test … started" line as it
@@ -63,8 +63,13 @@ jobs:
       - name: Verify the signature
         run: codesign --verify --verbose=2 dist/Peeksy.app
 
-      - name: Check the hook script shipped inside the bundle
-        run: test -x dist/Peeksy.app/Contents/Resources/peeksy-hook.sh
+      - name: Check both bundled hook scripts
+        run: |
+          test -x dist/Peeksy.app/Contents/Resources/peeksy-hook.sh
+          test -x dist/Peeksy.app/Contents/Resources/peeksy-codex-hook.sh
+
+      - name: Exercise the Codex installer against temporary settings
+        run: python3 scripts/test_codex_install.py dist/Peeksy.app/Contents/MacOS/Peeksy
 
   shellcheck:
     name: Shell scripts
@@ -72,4 +77,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck scripts/*.sh hooks/peeksy-hook.sh
+        run: shellcheck scripts/*.sh hooks/*.sh

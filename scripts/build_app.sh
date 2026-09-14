@@ -12,11 +12,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 APP_NAME="Peeksy"
 BUNDLE_ID="com.vijaypatel.peeksy"
-VERSION="0.1.0"
+VERSION="0.2.0"
 BINARY="Peeksy"
 DIST="dist"
 APP="$DIST/$APP_NAME.app"
-HOOK_SRC="hooks/peeksy-hook.sh"
 ICON_SRC="assets/AppIcon.png"
 ICON="AppIcon.icns"
 

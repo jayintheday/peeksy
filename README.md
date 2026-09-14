@@ -3,9 +3,9 @@
 **Mission control for your AI agents.**
 
 Peeksy is a background macOS app that sits a small pill next to your MacBook's
-notch. The colour is the most urgent thing happening across every Claude Code and Codex
-session you have running. Hover to see the list, click a row to jump straight
-into that session.
+notch. Its colour reflects the most urgent state across your **Claude Code and
+Codex** sessions. Hover to see the list; click a row to return to its terminal
+tab or owning application.
 
 <img src="assets/screenshot.png" alt="Peeksy expanded beside the notch, showing one working session" width="100%">
 
@@ -16,7 +16,8 @@ Peeksy keeps that visible without another window to watch.
 ## Requirements
 
 - macOS 14 or later
-- [Claude Code](https://claude.com/claude-code) and/or a current Codex CLI with lifecycle hooks
+- [Claude Code](https://claude.com/claude-code) and/or a current
+  [Codex CLI](https://developers.openai.com/codex/cli) with lifecycle hooks
   (integration baseline: Codex CLI 0.154.0)
 - A Swift toolchain (Xcode or the Command Line Tools). You build it yourself;
   see [Installing](#installing).
@@ -27,10 +28,11 @@ untested, as is multi-display. See [Known gaps](#known-gaps).
 
 ## Installing
 
-There are no prebuilt downloads yet. An ad-hoc signed app hits Gatekeeper when
-downloaded, and the signature changes on every build, which silently revokes
-Automation permission on every update. Building it yourself avoids both. See
-[Signing](#signing).
+Releases contain source code; build the app locally using the commands below.
+The resulting app is ad-hoc signed. Rebuilding can require granting Automation
+permission again; see [Signing](#signing).
+
+See [what changed in v0.2.0](CHANGELOG.md).
 
 ```sh
 git clone https://github.com/jayintheday/peeksy.git
@@ -41,12 +43,15 @@ open ~/Applications/Peeksy.app
 
 The pill should appear next to the notch. Then do these two things once:
 
-1. **Register the hook.** Hover the pill and click *Install the hook…*. You
-   get a unified diff of the exact change before anything is written. Or from
-   the command line:
+1. **Register your agent hooks.** Hover the pill, open the gear menu, and
+   choose **Agent hooks…**. Select **Claude Code** or **Codex**, review the diff,
+   and install. Repeat for the other agent if you use both. For Codex, then
+   **open `/hooks` in Codex and review and trust the Peeksy hooks**.
+   Alternatively, use the command line:
 
    ```sh
-   scripts/install_hook.sh              # preview, then ask before writing
+   scripts/install_hook.sh --agent claude-code
+   scripts/install_hook.sh --agent codex       # then trust via Codex /hooks
    ```
 
 2. **Grant Automation.** Click any session row. macOS will ask for permission
@@ -107,8 +112,10 @@ continue a turn, so completion remains an observed lifecycle signal rather
 than a guarantee that the agent will never continue.
 
 The integration is tested with native-format fixtures, real local socket
-traffic, and the shipped bridge script. Personal hook settings and trust have
-not been modified for those tests. Before claiming support for another host,
+traffic, and the shipped bridge script. Local use of the Codex integration was
+confirmed by the maintainer on macOS; this does not establish coverage for
+every host or lifecycle scenario. Automated installer tests use temporary
+configuration files. Before claiming support for another host,
 verify permission approval/rejection, interruption, resume, normal exit, crash
 cleanup, and click-to-focus with a trusted live session in that host.
 
@@ -116,8 +123,8 @@ Reference: [Codex hooks](https://learn.chatgpt.com/docs/hooks).
 
 ### Launch at login, and quitting
 
-Peeksy has no Dock icon and no menu-bar menu. Both controls live on the gear
-icon at the right of the panel header:
+Peeksy has no Dock icon and no menu-bar menu. Launch-at-login, agent-hook setup,
+and quitting are available through the gear icon at the right of the panel header:
 
 - **Launch at login** is off by default. Turn it on and macOS starts Peeksy for
   you. It also appears in System Settings → General → Login Items; turning it
@@ -214,15 +221,11 @@ from System Settings → General → Login Items.
 
 ## How it works
 
-```
-claude ──hook──▶ peeksy-hook.sh ──POST──▶ unix socket ──▶ EventRouter
-                                                                   │
-                                                          ClaudeCodeAdapter
-                                                                   │
-                                                            SessionRegistry
-                                                          (a struct, not an actor)
-                                                                   │
-                                                        SessionStore ──▶ the pill
+```text
+Claude Code → peeksy-hook.sh       → /v1/event/claude-code → ClaudeCodeAdapter ┐
+Codex       → peeksy-codex-hook.sh → /v1/event/codex       → CodexAdapter      ├─→ SessionRegistry
+                       (private Unix socket + EventRouter)                   ┘         │
+                                                                               SessionStore → pill
 ```
 
 The codebase is split hard at AppKit:
